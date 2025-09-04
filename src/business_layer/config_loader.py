@@ -1,5 +1,5 @@
 """設定ファイル読み込みモジュール"""
-import os
+import copy
 from pathlib import Path
 from typing import Dict, Any, Optional, Callable, Union
 import yaml
@@ -55,12 +55,7 @@ class ConfigLoader:
         """YAMLファイルを読み込む"""
         try:
             with config_path.open('r', encoding='utf-8') as f:
-                content = f.read()
-                
-                if not content.strip():
-                    raise ConfigError("設定ファイルが空です")
-                
-                config = yaml.safe_load(content)
+                config = yaml.safe_load(f)
                 
                 if config is None:
                     raise ConfigError("設定ファイルが空です")
@@ -76,7 +71,7 @@ class ConfigLoader:
     
     def _merge_defaults(self, defaults: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
         """デフォルト値をマージする"""
-        result = defaults.copy()
+        result = copy.deepcopy(defaults)
         
         def deep_merge(base: Dict[str, Any], update: Dict[str, Any]) -> Dict[str, Any]:
             for key, value in update.items():

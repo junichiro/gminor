@@ -1,5 +1,6 @@
 """設定ファイル読み込み機能のテスト"""
 import os
+import shutil
 import tempfile
 from pathlib import Path
 import pytest
@@ -17,7 +18,6 @@ class TestConfigLoader:
 
     def teardown_method(self):
         """各テストメソッドの後処理"""
-        import shutil
         shutil.rmtree(self.temp_dir)
 
     def test_正常な設定ファイルを読み込める(self):
@@ -105,22 +105,18 @@ class TestConfigLoader:
         assert result["database"]["name"] == "defaultdb"  # デフォルト値
         assert result["logging"]["level"] == "WARNING"  # デフォルト値
 
-    def test_相対パスを絶対パスに変換できる(self):
+    def test_相対パスを絶対パスに変換できる(self, monkeypatch):
         """正常系: 相対パスを指定した場合でも読み込めることを確認"""
         config_data = {"test": "value"}
         
-        # 現在のディレクトリを一時ディレクトリに変更
-        original_cwd = os.getcwd()
-        os.chdir(self.temp_dir)
+        # monkeypatchを使用して安全にディレクトリを変更
+        monkeypatch.chdir(self.temp_dir)
         
-        try:
-            with open("config.yaml", "w", encoding="utf-8") as f:
-                yaml.dump(config_data, f)
-            
-            result = self.loader.load_config("config.yaml")
-            assert result == config_data
-        finally:
-            os.chdir(original_cwd)
+        with open("config.yaml", "w", encoding="utf-8") as f:
+            yaml.dump(config_data, f)
+        
+        result = self.loader.load_config("config.yaml")
+        assert result == config_data
 
     def test_設定値の検証機能が動作する(self):
         """正常系: バリデーション機能が正しく動作することを確認"""
