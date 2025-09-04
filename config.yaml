@@ -1,0 +1,19 @@
+# gminor アプリケーション設定ファイル
+
+database:
+  host: localhost
+  port: 5432
+  name: gminor_db
+
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+github:
+  api_base_url: https://api.github.com
+  timeout: 30
+
+application:
+  name: gminor
+  version: 1.0.0
+  environment: development
