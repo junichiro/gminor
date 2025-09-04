@@ -5,7 +5,7 @@
 - WeeklyMetrics: 週次集計データ（キャッシュ用）
 - SyncStatus: リポジトリ同期状態の管理
 """
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 from typing import Optional, ClassVar, Set
 from sqlalchemy import (
     Column,
@@ -46,9 +46,9 @@ class PullRequest(Base):
     title = Column(String(1000), nullable=False, comment="プルリクエストのタイトル")
     merged_at = Column(DateTime(timezone=True), nullable=True, comment="マージ日時（未マージの場合はNULL）")
     
-    # タイムスタンプ
-    created_at = Column(DateTime(timezone=True), nullable=False, comment="作成日時")
-    updated_at = Column(DateTime(timezone=True), nullable=False, comment="更新日時")
+    # タイムスタンプ（自動設定）
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), comment="作成日時")
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment="更新日時")
     
     # 制約とインデックス
     __table_args__ = (
@@ -92,16 +92,15 @@ class WeeklyMetrics(Base):
     merged_pr_count = Column(Integer, nullable=False, default=0, comment="マージされたPR数")
     total_authors = Column(Integer, nullable=False, default=0, comment="ユニークな作成者数")
     
-    # タイムスタンプ
-    created_at = Column(DateTime(timezone=True), nullable=False, comment="作成日時")
-    updated_at = Column(DateTime(timezone=True), nullable=False, comment="更新日時")
+    # タイムスタンプ（自動設定）
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), comment="作成日時")
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment="更新日時")
     
     # 制約とインデックス
     __table_args__ = (
         UniqueConstraint('week_start_date', 'repo_name', name='uq_week_repo'),
         Index('idx_week_start_date', 'week_start_date'),
         Index('idx_weekly_repo_name', 'repo_name'),
-        Index('idx_week_repo_composite', 'week_start_date', 'repo_name'),
     )
     
     @validates('pr_count', 'merged_pr_count', 'total_authors')
@@ -132,7 +131,6 @@ class WeeklyMetrics(Base):
     @property
     def week_end_date(self) -> date:
         """週の終了日を計算（日曜日）"""
-        from datetime import timedelta
         return self.week_start_date + timedelta(days=6)
     
     def get_week_range_str(self) -> str:
@@ -166,9 +164,9 @@ class SyncStatus(Base):
     status = Column(String(50), nullable=False, default='pending', comment="同期ステータス")
     error_message = Column(String(2000), nullable=True, comment="エラーメッセージ（エラー時のみ）")
     
-    # タイムスタンプ
-    created_at = Column(DateTime(timezone=True), nullable=False, comment="作成日時")
-    updated_at = Column(DateTime(timezone=True), nullable=False, comment="更新日時")
+    # タイムスタンプ（自動設定）
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), comment="作成日時")
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment="更新日時")
     
     # インデックス
     __table_args__ = (
