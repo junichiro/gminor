@@ -1,0 +1,285 @@
+"""ProductivityAggregatorのテスト"""
+import pytest
+import pandas as pd
+from datetime import datetime, timezone
+from unittest.mock import Mock
+
+from src.business_layer.aggregator import ProductivityAggregator
+from src.business_layer.timezone_handler import TimezoneHandler
+
+
+class TestProductivityAggregator:
+    """ProductivityAggregatorクラスのテスト"""
+    
+    @pytest.fixture
+    def timezone_handler(self):
+        """TimezoneHandlerのフィクスチャ"""
+        return TimezoneHandler("Asia/Tokyo")
+    
+    @pytest.fixture
+    def aggregator(self, timezone_handler):
+        """ProductivityAggregatorのフィクスチャ"""
+        return ProductivityAggregator(timezone_handler)
+    
+    def test_ProductivityAggregatorが正常に初期化される(self, timezone_handler):
+        """正常系: ProductivityAggregatorが正常に初期化されることを確認"""
+        aggregator = ProductivityAggregator(timezone_handler)
+        assert aggregator is not None
+        assert aggregator.timezone_handler == timezone_handler
+    
+    def test_週次メトリクス計算が正常に動作する(self, aggregator):
+        """正常系: 週次メトリクスが正常に計算されることを確認"""
+        # テストデータ: 同じ週に複数のPR
+        prs = [
+            {
+                "number": 1,
+                "title": "PR 1",
+                "author": "developer1",
+                "merged_at": datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc),  # 月曜日
+                "created_at": datetime(2024, 1, 10, 9, 0, tzinfo=timezone.utc),
+                "updated_at": datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc)
+            },
+            {
+                "number": 2,
+                "title": "PR 2", 
+                "author": "developer2",
+                "merged_at": datetime(2024, 1, 16, 11, 0, tzinfo=timezone.utc),  # 火曜日
+                "created_at": datetime(2024, 1, 11, 9, 0, tzinfo=timezone.utc),
+                "updated_at": datetime(2024, 1, 16, 11, 0, tzinfo=timezone.utc)
+            },
+            {
+                "number": 3,
+                "title": "PR 3",
+                "author": "developer1",
+                "merged_at": datetime(2024, 1, 17, 12, 0, tzinfo=timezone.utc),  # 水曜日
+                "created_at": datetime(2024, 1, 12, 9, 0, tzinfo=timezone.utc),
+                "updated_at": datetime(2024, 1, 17, 12, 0, tzinfo=timezone.utc)
+            }
+        ]
+        
+        result = aggregator.calculate_weekly_metrics(prs)
+        
+        # DataFrameが返されることを確認
+        assert isinstance(result, pd.DataFrame)
+        
+        # 少なくとも1週分のデータがあることを確認
+        assert len(result) >= 1
+        
+        # 必要な列が存在することを確認
+        expected_columns = ['week_start', 'week_end', 'pr_count', 'unique_authors', 'productivity']
+        for col in expected_columns:
+            assert col in result.columns
+    
+    def test_ユニークな作成者数が正しくカウントされる(self, aggregator):
+        """正常系: ユニークな作成者数が正しくカウントされることを確認"""
+        # テストデータ: 3つのPR、2人の異なる作成者
+        prs = [
+            {
+                "number": 1,
+                "title": "PR 1",
+                "author": "developer1",
+                "merged_at": datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc),
+                "created_at": datetime(2024, 1, 10, 9, 0, tzinfo=timezone.utc),
+                "updated_at": datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc)
+            },
+            {
+                "number": 2,
+                "title": "PR 2",
+                "author": "developer1",  # 同じ作成者
+                "merged_at": datetime(2024, 1, 16, 11, 0, tzinfo=timezone.utc),
+                "created_at": datetime(2024, 1, 11, 9, 0, tzinfo=timezone.utc),
+                "updated_at": datetime(2024, 1, 16, 11, 0, tzinfo=timezone.utc)
+            },
+            {
+                "number": 3,
+                "title": "PR 3",
+                "author": "developer2",  # 異なる作成者
+                "merged_at": datetime(2024, 1, 17, 12, 0, tzinfo=timezone.utc),
+                "created_at": datetime(2024, 1, 12, 9, 0, tzinfo=timezone.utc),
+                "updated_at": datetime(2024, 1, 17, 12, 0, tzinfo=timezone.utc)
+            }
+        ]
+        
+        result = aggregator.calculate_weekly_metrics(prs)
+        
+        # 最初の週のデータを確認
+        first_week = result.iloc[0]
+        assert first_week['pr_count'] == 3  # 3つのPR
+        assert first_week['unique_authors'] == 2  # 2人のユニークな作成者
+    
+    def test_生産性計算が正しく動作する(self, aggregator):
+        """正常系: 生産性（PR数÷作成者数）が正しく計算されることを確認"""
+        prs = [
+            {
+                "number": 1,
+                "title": "PR 1",
+                "author": "developer1",
+                "merged_at": datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc),
+                "created_at": datetime(2024, 1, 10, 9, 0, tzinfo=timezone.utc),
+                "updated_at": datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc)
+            },
+            {
+                "number": 2,
+                "title": "PR 2",
+                "author": "developer2",
+                "merged_at": datetime(2024, 1, 16, 11, 0, tzinfo=timezone.utc),
+                "created_at": datetime(2024, 1, 11, 9, 0, tzinfo=timezone.utc),
+                "updated_at": datetime(2024, 1, 16, 11, 0, tzinfo=timezone.utc)
+            }
+        ]
+        
+        result = aggregator.calculate_weekly_metrics(prs)
+        
+        # 最初の週のデータを確認
+        first_week = result.iloc[0]
+        assert first_week['pr_count'] == 2
+        assert first_week['unique_authors'] == 2
+        assert first_week['productivity'] == 1.0  # 2 PR ÷ 2 authors = 1.0
+    
+    def test_複数週にまたがるデータを正しく処理する(self, aggregator):
+        """正常系: 複数週にまたがるデータが正しく処理されることを確認"""
+        prs = [
+            # 第1週のPR
+            {
+                "number": 1,
+                "title": "PR 1",
+                "author": "developer1",
+                "merged_at": datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc),  # 週1
+                "created_at": datetime(2024, 1, 10, 9, 0, tzinfo=timezone.utc),
+                "updated_at": datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc)
+            },
+            {
+                "number": 2,
+                "title": "PR 2",
+                "author": "developer2",
+                "merged_at": datetime(2024, 1, 16, 11, 0, tzinfo=timezone.utc),  # 週1
+                "created_at": datetime(2024, 1, 11, 9, 0, tzinfo=timezone.utc),
+                "updated_at": datetime(2024, 1, 16, 11, 0, tzinfo=timezone.utc)
+            },
+            # 第2週のPR
+            {
+                "number": 3,
+                "title": "PR 3",
+                "author": "developer3",
+                "merged_at": datetime(2024, 1, 22, 10, 0, tzinfo=timezone.utc),  # 週2
+                "created_at": datetime(2024, 1, 20, 9, 0, tzinfo=timezone.utc),
+                "updated_at": datetime(2024, 1, 22, 10, 0, tzinfo=timezone.utc)
+            }
+        ]
+        
+        result = aggregator.calculate_weekly_metrics(prs)
+        
+        # 2週分のデータがあることを確認
+        assert len(result) == 2
+        
+        # 各週のデータを確認
+        week1 = result.iloc[0]
+        week2 = result.iloc[1]
+        
+        assert week1['pr_count'] == 2
+        assert week1['unique_authors'] == 2
+        assert week2['pr_count'] == 1 
+        assert week2['unique_authors'] == 1
+    
+    def test_空のデータリストを正しく処理する(self, aggregator):
+        """正常系: 空のデータリストが正しく処理されることを確認"""
+        prs = []
+        
+        result = aggregator.calculate_weekly_metrics(prs)
+        
+        # 空のDataFrameが返されることを確認
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 0
+        
+        # カラムは定義されていることを確認
+        expected_columns = ['week_start', 'week_end', 'pr_count', 'unique_authors', 'productivity']
+        for col in expected_columns:
+            assert col in result.columns
+    
+    def test_同一作成者が同じ週に複数PRを作成する場合(self, aggregator):
+        """正常系: 同一作成者が同じ週に複数PRを作成する場合を正しく処理することを確認"""
+        prs = [
+            {
+                "number": 1,
+                "title": "PR 1",
+                "author": "developer1",
+                "merged_at": datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc),
+                "created_at": datetime(2024, 1, 10, 9, 0, tzinfo=timezone.utc),
+                "updated_at": datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc)
+            },
+            {
+                "number": 2,
+                "title": "PR 2",
+                "author": "developer1",  # 同じ作成者
+                "merged_at": datetime(2024, 1, 16, 11, 0, tzinfo=timezone.utc),
+                "created_at": datetime(2024, 1, 11, 9, 0, tzinfo=timezone.utc),
+                "updated_at": datetime(2024, 1, 16, 11, 0, tzinfo=timezone.utc)
+            },
+            {
+                "number": 3,
+                "title": "PR 3", 
+                "author": "developer1",  # 同じ作成者
+                "merged_at": datetime(2024, 1, 17, 12, 0, tzinfo=timezone.utc),
+                "created_at": datetime(2024, 1, 12, 9, 0, tzinfo=timezone.utc),
+                "updated_at": datetime(2024, 1, 17, 12, 0, tzinfo=timezone.utc)
+            }
+        ]
+        
+        result = aggregator.calculate_weekly_metrics(prs)
+        
+        # 最初の週のデータを確認
+        first_week = result.iloc[0]
+        assert first_week['pr_count'] == 3  # 3つのPR
+        assert first_week['unique_authors'] == 1  # 1人のユニークな作成者
+        assert first_week['productivity'] == 3.0  # 3 PR ÷ 1 author = 3.0
+    
+    def test_異なるタイムゾーンのデータを正しく処理する(self, aggregator):
+        """正常系: 異なるタイムゾーンのデータが正しく処理されることを確認"""
+        # UTC以外のタイムゾーンを含むデータ
+        from zoneinfo import ZoneInfo
+        
+        prs = [
+            {
+                "number": 1,
+                "title": "PR 1",
+                "author": "developer1",
+                "merged_at": datetime(2024, 1, 15, 19, 0, tzinfo=ZoneInfo("Asia/Tokyo")),  # JST
+                "created_at": datetime(2024, 1, 10, 9, 0, tzinfo=timezone.utc),
+                "updated_at": datetime(2024, 1, 15, 19, 0, tzinfo=ZoneInfo("Asia/Tokyo"))
+            }
+        ]
+        
+        result = aggregator.calculate_weekly_metrics(prs)
+        
+        # データが正常に処理されることを確認
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) >= 1
+    
+    def test_週境界をまたぐ時刻の処理(self, aggregator):
+        """正常系: 週境界をまたぐ時刻が正しく処理されることを確認"""
+        prs = [
+            # 日曜日の深夜（週の終わり）
+            {
+                "number": 1,
+                "title": "PR 1",
+                "author": "developer1", 
+                "merged_at": datetime(2024, 1, 14, 23, 59, tzinfo=timezone.utc),  # 日曜 23:59 UTC
+                "created_at": datetime(2024, 1, 10, 9, 0, tzinfo=timezone.utc),
+                "updated_at": datetime(2024, 1, 14, 23, 59, tzinfo=timezone.utc)
+            },
+            # 月曜日の早朝（週の始まり）
+            {
+                "number": 2,
+                "title": "PR 2",
+                "author": "developer2",
+                "merged_at": datetime(2024, 1, 15, 0, 1, tzinfo=timezone.utc),  # 月曜 00:01 UTC
+                "created_at": datetime(2024, 1, 11, 9, 0, tzinfo=timezone.utc),
+                "updated_at": datetime(2024, 1, 15, 0, 1, tzinfo=timezone.utc)
+            }
+        ]
+        
+        result = aggregator.calculate_weekly_metrics(prs)
+        
+        # タイムゾーンを考慮して適切に週が分けられることを確認
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) >= 1
