@@ -64,22 +64,24 @@ class SyncManager:
         start_time = time.time()
         
         if not repositories:
-            return self._create_sync_result(0, 0, start_time)
+            return self._create_sync_result(0, 0, start_time, [])
         
         try:
             since_date = self._calculate_since_date(days_back)
-            total_prs_fetched, processed_repositories = self._process_repositories(
+            total_prs_fetched, processed_repositories, failed_repositories = self._process_repositories(
                 repositories, since_date, progress
             )
             
             if progress:
-                self._display_completion_message(processed_repositories)
+                self._display_completion_message(processed_repositories, failed_repositories)
             
-            return self._create_sync_result(processed_repositories, total_prs_fetched, start_time)
+            return self._create_sync_result(
+                processed_repositories, total_prs_fetched, start_time, failed_repositories
+            )
         
-        except (DatabaseError, GitHubAPIError) as e:
-            self.logger.error(f"Sync error: {e}")
-            raise DataSyncError(f"Sync error: {e}", e)
+        except DatabaseError as e:
+            self.logger.error(f"Database error during sync: {e}")
+            raise DataSyncError(f"Database error during sync: {e}", e)
         
         except Exception as e:
             self.logger.error(f"Unexpected error during sync: {e}")
@@ -90,15 +92,16 @@ class SyncManager:
         return datetime.now(timezone.utc) - timedelta(days=days_back)
     
     def _process_repositories(self, repositories: List[str], since_date: datetime, 
-                            progress: bool) -> Tuple[int, int]:
+                            progress: bool) -> Tuple[int, int, List[str]]:
         """
-        リポジトリリストを処理
+        リポジトリリストを処理（エラー時も他のリポジトリは継続処理）
         
         Returns:
-            Tuple[取得したPR総数, 処理したリポジトリ数]
+            Tuple[取得したPR総数, 処理成功したリポジトリ数, 失敗したリポジトリリスト]
         """
         total_prs_fetched = 0
         processed_repositories = 0
+        failed_repositories = []
         
         for i, repository in enumerate(repositories):
             if progress:
@@ -113,9 +116,11 @@ class SyncManager:
                 error_message = f"Error processing {repository}: {e}"
                 self.logger.error(error_message)
                 self._update_sync_status(repository, 'error', str(e))
-                raise DataSyncError(error_message, e)
+                failed_repositories.append(repository)
+                # エラーが発生しても他のリポジトリの処理は継続
+                continue
         
-        return total_prs_fetched, processed_repositories
+        return total_prs_fetched, processed_repositories, failed_repositories
     
     def _process_single_repository(self, repository: str, since_date: datetime) -> int:
         """
@@ -145,26 +150,41 @@ class SyncManager:
         return len(saved_prs)
     
     def _create_sync_result(self, processed_repositories: int, total_prs_fetched: int, 
-                          start_time: float) -> Dict[str, Any]:
+                          start_time: float, failed_repositories: List[str]) -> Dict[str, Any]:
         """同期結果を作成"""
-        return {
-            'status': 'success',
+        status = 'success' if not failed_repositories else 'partial_success'
+        
+        result = {
+            'status': status,
             'processed_repositories': processed_repositories,
             'total_prs_fetched': total_prs_fetched,
             'sync_duration_seconds': time.time() - start_time
         }
+        
+        if failed_repositories:
+            result['failed_repositories'] = failed_repositories
+            result['failed_count'] = len(failed_repositories)
+        
+        return result
     
     def _display_progress_message(self, current: int, total: int, repository: str) -> None:
         """プログレス表示メッセージを表示"""
-        print(f"Processing repository {current}/{total}: {repository}")
+        self.logger.info(f"Processing repository {current}/{total}: {repository}")
     
-    def _display_completion_message(self, processed_repositories: int) -> None:
+    def _display_completion_message(self, processed_repositories: int, 
+                                  failed_repositories: List[str]) -> None:
         """完了メッセージを表示"""
-        print(f"Completed synchronization of {processed_repositories} repositories")
+        if not failed_repositories:
+            self.logger.info(f"Successfully completed synchronization of {processed_repositories} repositories")
+        else:
+            self.logger.warning(
+                f"Completed synchronization with {processed_repositories} successful, "
+                f"{len(failed_repositories)} failed: {failed_repositories}"
+            )
     
     def _save_pr_data(self, repository: str, pr_data: List[Dict[str, Any]]) -> List[PullRequest]:
         """
-        PRデータをデータベースに保存（重複チェック付き）
+        PRデータをデータベースに保存（重複チェック付き、一括操作で最適化）
         
         Args:
             repository: リポジトリ名
@@ -173,17 +193,23 @@ class SyncManager:
         Returns:
             保存されたPRオブジェクトのリスト
         """
+        if not pr_data:
+            return []
+        
         saved_prs = []
         
         with self.db_manager.get_session() as session:
+            # 一括重複チェック：該当するPR番号のリストを一度に取得
+            pr_numbers = [pr_info["number"] for pr_info in pr_data]
+            existing_prs = session.query(PullRequest.pr_number).filter(
+                PullRequest.repo_name == repository,
+                PullRequest.pr_number.in_(pr_numbers)
+            ).all()
+            existing_pr_numbers = {pr.pr_number for pr in existing_prs}
+            
+            # 新しいPRのみを一括作成
             for pr_info in pr_data:
-                # 重複チェック
-                existing_pr = session.query(PullRequest).filter(
-                    PullRequest.repo_name == repository,
-                    PullRequest.pr_number == pr_info["number"]
-                ).first()
-                
-                if not existing_pr:
+                if pr_info["number"] not in existing_pr_numbers:
                     pr = PullRequest(
                         repo_name=repository,
                         pr_number=pr_info["number"],
@@ -195,15 +221,17 @@ class SyncManager:
                     )
                     saved_prs.append(pr)
             
+            # 一括保存
             if saved_prs:
                 session.add_all(saved_prs)
                 session.commit()
+                self.logger.info(f"Saved {len(saved_prs)} new PRs for repository {repository}")
         
         return saved_prs
     
     def _save_weekly_metrics(self, repository: str, weekly_metrics_df) -> None:
         """
-        週次メトリクスをデータベースに保存
+        週次メトリクスをデータベースに保存（一括操作で最適化）
         
         Args:
             repository: リポジトリ名
@@ -213,24 +241,33 @@ class SyncManager:
             return
         
         with self.db_manager.get_session() as session:
+            # 一括重複チェック
+            week_dates = [row['week_start'].date() for _, row in weekly_metrics_df.iterrows()]
+            existing_metrics = session.query(WeeklyMetrics.week_start_date).filter(
+                WeeklyMetrics.repo_name == repository,
+                WeeklyMetrics.week_start_date.in_(week_dates)
+            ).all()
+            existing_week_dates = {metrics.week_start_date for metrics in existing_metrics}
+            
+            # 新しいメトリクスのみを一括作成
+            new_metrics = []
             for _, row in weekly_metrics_df.iterrows():
-                # 重複チェック
-                existing_metrics = session.query(WeeklyMetrics).filter(
-                    WeeklyMetrics.repo_name == repository,
-                    WeeklyMetrics.week_start_date == row['week_start'].date()
-                ).first()
-                
-                if not existing_metrics:
+                week_date = row['week_start'].date()
+                if week_date not in existing_week_dates:
                     metrics = WeeklyMetrics(
                         repo_name=repository,
-                        week_start_date=row['week_start'].date(),
+                        week_start_date=week_date,
                         pr_count=row['pr_count'],
                         merged_pr_count=row['pr_count'],  # 集計済みデータはすべてマージ済み
                         total_authors=row['unique_authors']
                     )
-                    session.add(metrics)
+                    new_metrics.append(metrics)
             
-            session.commit()
+            # 一括保存
+            if new_metrics:
+                session.add_all(new_metrics)
+                session.commit()
+                self.logger.info(f"Saved {len(new_metrics)} weekly metrics for repository {repository}")
     
     def _update_sync_status(self, repository: str, status: str, 
                           error_message: Optional[str] = None) -> None:

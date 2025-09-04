@@ -157,16 +157,15 @@ class TestSyncManager:
         """正常系: データの重複回避ロジックが正常に動作することを確認"""
         repositories = ["test/repo"]
         
-        # 既存のPRデータをモック（重複データ）
+        # 既存のPRデータをモック（重複データ）- 一括チェック用
         existing_pr = Mock()
-        existing_pr.pr_number = 1
-        existing_pr.repo_name = "test/repo"
+        existing_pr.pr_number = 1  # sample_pr_dataの最初のPRと重複
         
         mock_session = Mock()
         mock_db_manager.get_session.return_value.__enter__.return_value = mock_session
         
-        # 既存データありの場合とない場合を交互に返す
-        mock_session.query.return_value.filter.return_value.first.side_effect = [existing_pr, None]
+        # 一括重複チェック用のモック
+        mock_session.query.return_value.filter.return_value.all.return_value = [existing_pr]
         
         # GitHubからのPR取得をモック
         mock_github_client.fetch_merged_prs.return_value = sample_pr_data
@@ -194,29 +193,36 @@ class TestSyncManager:
         mock_db_manager.get_session.return_value.__enter__.return_value = mock_session
         mock_session.query.return_value.filter.return_value.first.return_value = None
         
-        with patch('builtins.print') as mock_print:
+        with patch.object(sync_manager.logger, 'info') as mock_log_info:
             result = sync_manager.initial_sync(repositories, progress=True)
             
-            # プログレス表示が呼び出されたことを確認
-            assert mock_print.called
-            progress_calls = [call for call in mock_print.call_args_list 
-                            if 'Processing repository' in str(call) or 'Completed' in str(call)]
-            assert len(progress_calls) > 0
+            # プログレス表示ログが呼び出されたことを確認
+            assert mock_log_info.called
+            progress_calls = [call for call in mock_log_info.call_args_list 
+                            if 'Processing repository' in str(call)]
+            assert len(progress_calls) >= len(repositories)
     
     def test_GitHubAPIエラー時の適切な処理(self, sync_manager, mock_github_client,
                                     mock_db_manager, mock_aggregator):
-        """異常系: GitHubAPIエラーが発生した場合の適切な処理を確認"""
-        repositories = ["test/repo"]
+        """異常系: GitHubAPIエラーが発生した場合でも他のリポジトリは処理継続することを確認"""
+        repositories = ["test/repo1", "test/repo2"]
         
-        # GitHubAPIエラーをモック
-        mock_github_client.fetch_merged_prs.side_effect = GitHubAPIError("API Error", status_code=403)
+        # 1つ目のリポジトリでGitHubAPIエラー、2つ目は正常処理
+        mock_github_client.fetch_merged_prs.side_effect = [
+            GitHubAPIError("API Error", status_code=403),
+            []  # 2つ目のリポジトリは正常（空のリスト）
+        ]
         
-        # DataSyncErrorが発生することを確認
-        with pytest.raises(DataSyncError) as exc_info:
-            sync_manager.initial_sync(repositories)
+        mock_session = Mock()
+        mock_db_manager.get_session.return_value.__enter__.return_value = mock_session
         
-        assert "GitHub API error" in str(exc_info.value)
-        assert "API Error" in str(exc_info.value)
+        result = sync_manager.initial_sync(repositories)
+        
+        # 部分的な成功を確認
+        assert result['status'] == 'partial_success'
+        assert result['processed_repositories'] == 1  # 1つは成功
+        assert result['failed_count'] == 1
+        assert 'test/repo1' in result['failed_repositories']
     
     def test_データベースエラー時の適切な処理(self, sync_manager, mock_github_client,
                                       mock_db_manager, mock_aggregator,
@@ -227,10 +233,10 @@ class TestSyncManager:
         mock_github_client.fetch_merged_prs.return_value = sample_pr_data
         mock_aggregator.calculate_weekly_metrics.return_value = sample_weekly_metrics
         
-        # データベースエラーをモック
+        # データベースエラーをモック（重大なエラーなので全体停止）
         mock_db_manager.get_session.side_effect = DatabaseError("DB Connection Error")
         
-        # DataSyncErrorが発生することを確認
+        # DataSyncErrorが発生することを確認（データベース接続エラーは全体停止）
         with pytest.raises(DataSyncError) as exc_info:
             sync_manager.initial_sync(repositories)
         
@@ -240,22 +246,28 @@ class TestSyncManager:
     def test_集計処理エラー時の適切な処理(self, sync_manager, mock_github_client,
                                  mock_db_manager, mock_aggregator,
                                  sample_pr_data):
-        """異常系: 集計処理でエラーが発生した場合の適切な処理を確認"""
-        repositories = ["test/repo"]
+        """異常系: 集計処理でエラーが発生した場合でも他のリポジトリは処理継続することを確認"""
+        repositories = ["test/repo1", "test/repo2"]
         
-        mock_github_client.fetch_merged_prs.return_value = sample_pr_data
+        # GitHubから正常にデータ取得
+        mock_github_client.fetch_merged_prs.side_effect = [sample_pr_data, []]
+        
         mock_session = Mock()
         mock_db_manager.get_session.return_value.__enter__.return_value = mock_session
+        mock_session.query.return_value.filter.return_value.all.return_value = []  # 既存データなし
         
-        # 集計処理でエラー発生をモック
-        mock_aggregator.calculate_weekly_metrics.side_effect = Exception("Aggregation Error")
+        # 1つ目のリポジトリで集計エラー、2つ目は正常
+        mock_aggregator.calculate_weekly_metrics.side_effect = [
+            Exception("Aggregation Error"),
+            sample_pr_data  # 2つ目は正常（空でも良い）
+        ]
         
-        # DataSyncErrorが発生することを確認
-        with pytest.raises(DataSyncError) as exc_info:
-            sync_manager.initial_sync(repositories)
+        result = sync_manager.initial_sync(repositories)
         
-        assert "Aggregation error" in str(exc_info.value)
-        assert "Aggregation Error" in str(exc_info.value)
+        # 部分的な成功を確認
+        assert result['status'] == 'partial_success'
+        assert result['failed_count'] == 1
+        assert 'test/repo1' in result['failed_repositories']
     
     def test_SyncStatusが正常に更新される(self, sync_manager, mock_github_client,
                                   mock_db_manager, mock_aggregator,
