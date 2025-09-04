@@ -89,7 +89,7 @@ class TestConfigFiles:
         
         # Python関連の除外設定があることを確認
         assert "__pycache__" in content
-        assert "*.pyc" in content
+        assert "*.py[cod]" in content
         assert ".env" in content
         assert "logs/" in content
         assert "data/" in content
