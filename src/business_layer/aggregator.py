@@ -77,34 +77,26 @@ class ProductivityAggregator:
         return df
     
     def _aggregate_by_week(self, df: pd.DataFrame) -> pd.DataFrame:
-        """週次でデータを集計"""
-        weekly_groups = df.groupby(['week_start', 'week_end'])
+        """週次でデータを集計（pandas.groupby.agg()を使用して効率化）"""
+        # pandas.groupby.agg()を使って効率的に集計
+        aggregated = df.groupby(['week_start', 'week_end']).agg({
+            'number': 'count',  # PR数
+            'author': 'nunique'  # ユニークな作成者数
+        }).reset_index()
         
-        results = []
-        for (week_start, week_end), group in weekly_groups:
-            metrics = self._calculate_group_metrics(group, week_start, week_end)
-            results.append(metrics)
+        # カラム名を変更
+        aggregated = aggregated.rename(columns={
+            'number': 'pr_count',
+            'author': 'unique_authors'
+        })
         
-        return pd.DataFrame(results, columns=self.REQUIRED_COLUMNS)
-    
-    def _calculate_group_metrics(
-        self, 
-        group: pd.DataFrame, 
-        week_start: datetime, 
-        week_end: datetime
-    ) -> Dict[str, Any]:
-        """グループのメトリクスを計算"""
-        pr_count = len(group)
-        unique_authors = group['author'].nunique()
-        productivity = self._calculate_productivity(pr_count, unique_authors)
+        # 生産性を計算
+        aggregated['productivity'] = aggregated.apply(
+            lambda row: self._calculate_productivity(row['pr_count'], row['unique_authors']), 
+            axis=1
+        )
         
-        return {
-            'week_start': week_start,
-            'week_end': week_end,
-            'pr_count': pr_count,
-            'unique_authors': unique_authors,
-            'productivity': productivity
-        }
+        return aggregated[self.REQUIRED_COLUMNS]
     
     def _calculate_productivity(self, pr_count: int, unique_authors: int) -> float:
         """生産性を計算（ゼロ除算を避ける）"""

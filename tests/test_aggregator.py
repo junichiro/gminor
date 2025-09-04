@@ -62,13 +62,18 @@ class TestProductivityAggregator:
         # DataFrameが返されることを確認
         assert isinstance(result, pd.DataFrame)
         
-        # 少なくとも1週分のデータがあることを確認
-        assert len(result) >= 1
+        # 正確に1週分のデータがあることを確認
+        assert len(result) == 1
         
-        # 必要な列が存在することを確認
+        # 必要な列がすべて存在することを確認
         expected_columns = ['week_start', 'week_end', 'pr_count', 'unique_authors', 'productivity']
-        for col in expected_columns:
-            assert col in result.columns
+        assert list(result.columns) == expected_columns
+        
+        # 具体的なメトリクス値を確認
+        week_data = result.iloc[0]
+        assert week_data['pr_count'] == 3
+        assert week_data['unique_authors'] == 2  # developer1, developer2
+        assert week_data['productivity'] == 1.5  # 3 PRs / 2 authors = 1.5
     
     def test_ユニークな作成者数が正しくカウントされる(self, aggregator):
         """正常系: ユニークな作成者数が正しくカウントされることを確認"""
@@ -172,14 +177,22 @@ class TestProductivityAggregator:
         # 2週分のデータがあることを確認
         assert len(result) == 2
         
-        # 各週のデータを確認
+        # 結果が週開始日でソートされていることを確認
+        assert result.iloc[0]['week_start'] <= result.iloc[1]['week_start']
+        
+        # 各週の具体的なデータを確認
         week1 = result.iloc[0]
         week2 = result.iloc[1]
         
+        # 第1週のメトリクス
         assert week1['pr_count'] == 2
         assert week1['unique_authors'] == 2
+        assert week1['productivity'] == 1.0  # 2 PRs / 2 authors = 1.0
+        
+        # 第2週のメトリクス
         assert week2['pr_count'] == 1 
         assert week2['unique_authors'] == 1
+        assert week2['productivity'] == 1.0  # 1 PR / 1 author = 1.0
     
     def test_空のデータリストを正しく処理する(self, aggregator):
         """正常系: 空のデータリストが正しく処理されることを確認"""
@@ -191,10 +204,13 @@ class TestProductivityAggregator:
         assert isinstance(result, pd.DataFrame)
         assert len(result) == 0
         
-        # カラムは定義されていることを確認
+        # カラムが正確に定義されていることを確認
         expected_columns = ['week_start', 'week_end', 'pr_count', 'unique_authors', 'productivity']
-        for col in expected_columns:
-            assert col in result.columns
+        assert list(result.columns) == expected_columns
+        
+        # カラムの型が正しいことを確認（空でも型情報は保持される）
+        assert result.empty
+        assert result.shape == (0, 5)
     
     def test_同一作成者が同じ週に複数PRを作成する場合(self, aggregator):
         """正常系: 同一作成者が同じ週に複数PRを作成する場合を正しく処理することを確認"""
