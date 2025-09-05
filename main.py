@@ -16,13 +16,13 @@ from src.business_layer.timezone_handler import TimezoneHandler
 from src.business_layer.aggregator import ProductivityAggregator
 from src.business_layer.sync_manager import SyncManager
 from src.business_layer.metrics_service import MetricsService
+from src.business_layer.logging_config import setup_logging
 from src.data_layer.github_client import GitHubClient
 from src.data_layer.database_manager import DatabaseManager
 from src.presentation_layer.visualizer import ProductivityVisualizer
 from src.presentation_layer.cli import cli
 
-# ログ設定
-logging.basicConfig(level=logging.INFO)
+# ログは後で設定ファイルから初期化
 logger = logging.getLogger(__name__)
 
 
@@ -55,6 +55,10 @@ def load_and_validate_config() -> Dict[str, Any]:
         config_loader = ConfigLoader()
         config = config_loader.load_config('config.yaml')
         
+        # ログ設定を最初に初期化
+        setup_logging(config)
+        logger.info("Logging system initialized from configuration")
+        
         # GitHub APIトークンの環境変数からの取得
         github_token = os.getenv('GITHUB_TOKEN')
         if not github_token:
@@ -66,7 +70,7 @@ def load_and_validate_config() -> Dict[str, Any]:
         # 設定にトークンを注入
         config['github']['api_token'] = github_token
         
-        logger.info("Configuration loaded successfully")
+        logger.info("Configuration loaded and validated successfully")
         return config
         
     except Exception as e:

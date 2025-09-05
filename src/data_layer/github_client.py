@@ -344,7 +344,9 @@ class GitHubClient:
         logger.info(f"Fetching merged PRs for {repo} from {since} to {until} {progress_msg}")
         
         try:
+            logger.debug(f"Getting repository object for {repo}")
             repository = self._github.get_repo(repo)
+            logger.debug(f"Successfully retrieved repository: {repository.full_name}")
             
             # クローズされたPRを取得（マージされたものを含む）
             pulls = repository.get_pulls(

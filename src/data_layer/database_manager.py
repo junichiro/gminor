@@ -204,6 +204,7 @@ class DatabaseManager:
         try:
             from .models import PullRequest
             
+            logger.debug("Querying merged pull requests from database")
             with self.get_session() as session:
                 # マージされたPRのみを対象にクエリを実行
                 query = session.query(
@@ -214,6 +215,7 @@ class DatabaseManager:
                     PullRequest.merged_at.isnot(None)
                 ).order_by(PullRequest.merged_at)
                 
+                logger.debug(f"Executing query: {query}")
                 results = query.all()
                 
                 # プルリクエストデータをリスト形式に変換
@@ -225,6 +227,7 @@ class DatabaseManager:
                         'number': pr_number
                     })
                 
+                logger.debug(f"Successfully retrieved {len(pr_data)} merged pull requests")
                 logger.info(f"Retrieved {len(pr_data)} merged pull requests")
                 return pr_data
                 

@@ -20,29 +20,27 @@ github:
   # GitHub API 設定
   api_base_url: https://api.github.com
 
-# タイムゾーン設定
-timezone:
-  # 集計・表示用タイムゾーン（IANA タイムゾーン識別子）
-  display: "Asia/Tokyo"    # デフォルト: Asia/Tokyo
-  # データベース保存は常に UTC
-
 # 集計設定
 aggregation:
   week_start_day: "monday"  # 週の開始曜日
   moving_average_window: 4  # 移動平均の週数
   
-# 出力設定
-output:
-  html_path: "./output/productivity_report.html"
-  # 複数リポジトリの表示方法
-  chart_type: "combined"    # "combined": 統合グラフ, "separate": 個別グラフ, "both": 両方
-  
 # データベース設定
 database:
-  path: "./data/productivity.db"
+  name: "gminor_db"
   # SQLite 接続設定
   connection_pool_size: 5
   connection_timeout: 30
+  
+# アプリケーション設定
+application:
+  name: "gminor"
+  version: "1.0.0"
+  environment: "development"
+  timezone: "Asia/Tokyo"    # デフォルト: Asia/Tokyo
+  output:
+    directory: "output"
+    filename: "productivity_chart.html"
 
 # ロギング設定
 logging:
@@ -51,9 +49,3 @@ logging:
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
   max_file_size: "10MB"
   backup_count: 5
-
-# アプリケーション設定
-application:
-  name: "gminor"
-  version: "1.0.0"
-  environment: "development"
