@@ -156,29 +156,58 @@ cython_debug/
 #  be added to the global gitignore or merged into this project gitignore.  For a PyCharm
 #  project, it is the PyCharm files.
 .idea/
+# Project-specific PyCharm settings
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/dictionaries/
 
 # VS Code
 .vscode/
+# Project-specific IDE settings
+.vscode/settings.json
+.vscode/launch.json
 
-# Database files
+# GitHub Productivity Metrics Tool specific
+# Generated reports and data
+output/
+output/*.html
+output/*.json
+output/*.csv
+
+# Database files (SQLite)
 *.db
 *.sqlite
 *.sqlite3
+data/
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+
+# Temporary data and cache files
+data/cache/
+data/temp/
+.cache/
 
 # Log files
 logs/
 *.log
+app.log
+gminor.log
 
-# Data files
-data/
+# Backup files
+*.bak
+*.backup
+config.yaml.bak
 
-# Output files
-output/
+# Legacy/outdated configuration files
+config.yaml.example
 
 # Configuration files with secrets
+.env
 .env.local
 .env.production
 .env.development
+.env.test
 
 # OS generated files
 .DS_Store

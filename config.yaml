@@ -1,19 +1,56 @@
-# gminor アプリケーション設定ファイル
+# GitHub リポジトリ生産性メトリクス可視化ツール - 設定ファイル
+# 注意: GitHub トークンなどの機密情報は .env ファイルに設定してください
 
-database:
-  host: localhost
-  port: 5432
-  name: gminor_db
-
-logging:
-  level: INFO
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-
+# GitHub 設定
 github:
-  api_base_url: https://api.github.com
-  timeout: 30
+  # リポジトリリスト（owner/repo 形式）
+  # 例: ["organization/repo1", "organization/repo2"]
+  repositories:
+    - "your-org/repo1"
+    - "your-org/repo2"
+    - "your-org/repo3"
+  
+  # データ取得設定
+  fetch:
+    initial_days: 180      # 初回取得期間（日）
+    batch_size: 100        # API 一度の取得数
+    rate_limit_buffer: 100 # レート制限バッファ（残り何回で待機）
+    timeout: 30            # API リクエストタイムアウト（秒）
 
+# タイムゾーン設定
+timezone:
+  # 集計・表示用タイムゾーン（IANA タイムゾーン識別子）
+  display: "Asia/Tokyo"    # デフォルト: Asia/Tokyo
+  # データベース保存は常に UTC
+
+# 集計設定
+aggregation:
+  week_start_day: "monday"  # 週の開始曜日
+  moving_average_window: 4  # 移動平均の週数
+  
+# 出力設定
+output:
+  html_path: "./output/productivity_report.html"
+  # 複数リポジトリの表示方法
+  chart_type: "combined"    # "combined": 統合グラフ, "separate": 個別グラフ, "both": 両方
+  
+# データベース設定
+database:
+  path: "./data/productivity.db"
+  # SQLite 接続設定
+  connection_pool_size: 5
+  connection_timeout: 30
+
+# ロギング設定
+logging:
+  level: "INFO"            # DEBUG, INFO, WARNING, ERROR
+  file: "./logs/app.log"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  max_file_size: "10MB"
+  backup_count: 5
+
+# アプリケーション設定
 application:
-  name: gminor
-  version: 1.0.0
-  environment: development
+  name: "gminor"
+  version: "1.0.0"
+  environment: "development"
