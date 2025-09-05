@@ -199,8 +199,8 @@ gminor.log
 *.backup
 config.yaml.bak
 
-# Legacy/outdated configuration files
-config.yaml.example
+# User-specific configuration files
+config.yaml
 
 # Configuration files with secrets
 .env
@@ -208,6 +208,16 @@ config.yaml.example
 .env.production
 .env.development
 .env.test
+
+# User-specific configuration backups and variants
+config.local.yaml
+config.personal.yaml
+config.*.yaml
+!config.yaml.example
+
+# Additional environment files
+.envrc
+.env.backup
 
 # OS generated files
 .DS_Store

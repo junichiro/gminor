@@ -3,12 +3,13 @@
 
 # GitHub 設定
 github:
-  # リポジトリリスト（owner/repo 形式）
+  # 監視対象リポジトリリスト（owner/repo 形式）
+  # ここにあなたが分析したいリポジトリを追加してください
   repositories:
-    - "junichiro/gminor"  # 例: このリポジトリ自体
-    # - "organization/backend-api"     # 例: 組織のバックエンドAPI
-    # - "organization/frontend-app"    # 例: 組織のフロントエンドアプリ
-    # - "username/personal-project"    # 例: 個人プロジェクト
+    - "your-organization/backend-api"     # 例: 組織のバックエンドAPI
+    - "your-organization/frontend-app"    # 例: 組織のフロントエンドアプリ
+    - "your-username/personal-project"   # 例: 個人プロジェクト
+    # - "another-org/mobile-app"         # 例: 他の組織のモバイルアプリ
   
   # データ取得設定
   fetch:
