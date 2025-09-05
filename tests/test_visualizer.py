@@ -350,3 +350,160 @@ class TestMovingAverageVisualization:
             args, kwargs = mock_figure.update_layout.call_args
             assert 'showlegend' in kwargs
             assert kwargs['showlegend'] is True
+
+
+class TestStatisticsCalculation:
+    """統計サマリー計算機能のテスト"""
+    
+    @pytest.fixture
+    def timezone_handler(self):
+        """TimezoneHandlerのフィクスチャ"""
+        return TimezoneHandler("Asia/Tokyo")
+    
+    @pytest.fixture
+    def visualizer(self, timezone_handler):
+        """ProductivityVisualizerのフィクスチャ"""
+        return ProductivityVisualizer(timezone_handler)
+    
+    @pytest.fixture
+    def sample_weekly_data_for_stats(self):
+        """統計計算用のサンプル週次データ"""
+        return pd.DataFrame({
+            'week_start': [
+                datetime(2024, 1, 15, 0, 0, tzinfo=timezone.utc),
+                datetime(2024, 1, 22, 0, 0, tzinfo=timezone.utc),
+                datetime(2024, 1, 29, 0, 0, tzinfo=timezone.utc),
+                datetime(2024, 2, 5, 0, 0, tzinfo=timezone.utc)
+            ],
+            'week_end': [
+                datetime(2024, 1, 21, 23, 59, 59, tzinfo=timezone.utc),
+                datetime(2024, 1, 28, 23, 59, 59, tzinfo=timezone.utc),
+                datetime(2024, 2, 4, 23, 59, 59, tzinfo=timezone.utc),
+                datetime(2024, 2, 11, 23, 59, 59, tzinfo=timezone.utc)
+            ],
+            'pr_count': [5, 8, 3, 10],
+            'unique_authors': [2, 4, 2, 5],
+            'productivity': [2.5, 2.0, 1.5, 2.0]
+        })
+    
+    def test_calculate_statisticsが統計サマリーを正しく計算する(self, visualizer, sample_weekly_data_for_stats):
+        """正常系: calculate_statisticsが正しい統計サマリーを返すことを確認"""
+        result = visualizer.calculate_statistics(sample_weekly_data_for_stats, ['repo1', 'repo2'])
+        
+        # 期待する統計値
+        expected = {
+            'average_productivity': 2.0,  # (2.5 + 2.0 + 1.5 + 2.0) / 4
+            'max_productivity': 2.5,
+            'min_productivity': 1.5,
+            'max_productivity_week': '2024-01-15',
+            'min_productivity_week': '2024-01-29',
+            'total_prs': 26,  # 5 + 8 + 3 + 10
+            'total_contributors': 5,  # ユニーク作者の最大数
+            'target_repositories': ['repo1', 'repo2']
+        }
+        
+        assert result == expected
+    
+    def test_calculate_statisticsが空データを適切に処理する(self, visualizer):
+        """正常系: 空データに対して適切なデフォルト値を返すことを確認"""
+        empty_data = pd.DataFrame(columns=['week_start', 'week_end', 'pr_count', 'unique_authors', 'productivity'])
+        result = visualizer.calculate_statistics(empty_data, [])
+        
+        expected = {
+            'average_productivity': 0.0,
+            'max_productivity': 0.0,
+            'min_productivity': 0.0,
+            'max_productivity_week': 'N/A',
+            'min_productivity_week': 'N/A',
+            'total_prs': 0,
+            'total_contributors': 0,
+            'target_repositories': []
+        }
+        
+        assert result == expected
+
+
+class TestHtmlReportGeneration:
+    """HTMLレポート生成機能のテスト"""
+    
+    @pytest.fixture
+    def timezone_handler(self):
+        """TimezoneHandlerのフィクスチャ"""
+        return TimezoneHandler("Asia/Tokyo")
+    
+    @pytest.fixture
+    def visualizer(self, timezone_handler):
+        """ProductivityVisualizerのフィクスチャ"""
+        return ProductivityVisualizer(timezone_handler)
+    
+    @pytest.fixture
+    def sample_weekly_data_for_report(self):
+        """レポート生成用のサンプル週次データ"""
+        return pd.DataFrame({
+            'week_start': [
+                datetime(2024, 1, 15, 0, 0, tzinfo=timezone.utc),
+                datetime(2024, 1, 22, 0, 0, tzinfo=timezone.utc),
+                datetime(2024, 1, 29, 0, 0, tzinfo=timezone.utc)
+            ],
+            'week_end': [
+                datetime(2024, 1, 21, 23, 59, 59, tzinfo=timezone.utc),
+                datetime(2024, 1, 28, 23, 59, 59, tzinfo=timezone.utc),
+                datetime(2024, 2, 4, 23, 59, 59, tzinfo=timezone.utc)
+            ],
+            'pr_count': [5, 8, 3],
+            'unique_authors': [2, 4, 2],
+            'productivity': [2.5, 2.0, 1.5]
+        })
+    
+    def test_generate_html_reportがメタデータを含むHTMLを生成する(self, visualizer, sample_weekly_data_for_report):
+        """正常系: generate_html_reportがメタデータセクションを含むHTMLを生成することを確認"""
+        with patch('datetime.datetime') as mock_datetime:
+            mock_datetime.now.return_value = datetime(2024, 3, 1, 10, 30, 0)
+            
+            result = visualizer.generate_html_report(
+                sample_weekly_data_for_report, 
+                ['repo1', 'repo2', 'repo3']
+            )
+            
+            # HTMLの基本構造を確認
+            assert isinstance(result, str)
+            assert '<html>' in result.lower()
+            assert '<div class="metadata">' in result
+            
+            # メタデータの内容を確認
+            assert '生成日時: 2024-03-01 10:30 JST' in result
+            assert '対象期間: 2024-01-15 〜 2024-02-04' in result
+            assert '対象リポジトリ: repo1, repo2, repo3' in result
+    
+    def test_generate_html_reportが統計サマリーを含むHTMLを生成する(self, visualizer, sample_weekly_data_for_report):
+        """正常系: generate_html_reportが統計サマリーセクションを含むHTMLを生成することを確認"""
+        result = visualizer.generate_html_report(
+            sample_weekly_data_for_report,
+            ['repo1']
+        )
+        
+        # 統計サマリーセクションの存在を確認
+        assert '<div class="statistics">' in result
+        assert '<h2>統計サマリー</h2>' in result
+        
+        # 統計値の存在を確認（具体的な値は calculate_statistics のテストで確認）
+        assert '平均生産性:' in result
+        assert '最高生産性:' in result
+        assert '最低生産性:' in result
+        assert '総 PR 数:' in result
+        assert '総貢献者数:' in result
+    
+    def test_generate_html_reportがグラフを含むHTMLを生成する(self, visualizer, sample_weekly_data_for_report):
+        """正常系: generate_html_reportが生産性グラフを含むHTMLを生成することを確認"""
+        result = visualizer.generate_html_report(
+            sample_weekly_data_for_report,
+            ['repo1']
+        )
+        
+        # Plotlyグラフの存在を確認
+        assert 'plotly' in result.lower()
+        assert '<div' in result
+        
+        # 基本的なHTML構造を確認
+        assert '<html>' in result.lower()
+        assert '</html>' in result.lower()
