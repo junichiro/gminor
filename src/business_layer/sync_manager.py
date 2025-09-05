@@ -1,5 +1,5 @@
 """
-初回データ取得機能を担当するモジュール
+データ同期機能を担当するモジュール（初回同期・差分同期・期間指定同期）
 """
 import time
 from typing import List, Dict, Any, Optional, Tuple
@@ -480,3 +480,63 @@ class SyncManager:
             sync_result['last_pr_number'] = max(pr['number'] for pr in pr_data)
         
         self.update_sync_status(repository, sync_result)
+    
+    def fetch_period_data(self, repositories: List[str], from_date: str, to_date: str) -> Dict[str, Any]:
+        """
+        特定期間のデータを取得
+        
+        Args:
+            repositories: 対象リポジトリのリスト
+            from_date: 開始日（YYYY-MM-DD形式）
+            to_date: 終了日（YYYY-MM-DD形式）
+            
+        Returns:
+            取得結果を含む辞書
+        """
+        start_time = time.time()
+        total_prs_fetched = 0
+        
+        try:
+            # 日付をdatetimeオブジェクトに変換
+            start_datetime = datetime.strptime(from_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+            end_datetime = datetime.strptime(to_date, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+            
+            for repository in repositories:
+                try:
+                    # 期間指定でPRを取得
+                    pr_data = []
+                    all_prs = self.github_client.fetch_merged_prs(repo=repository, since=start_datetime)
+                    
+                    # 期間内のPRのみフィルタリング
+                    for pr in all_prs:
+                        if pr['merged_at'] <= end_datetime:
+                            pr_data.append(pr)
+                    
+                    if pr_data:
+                        # データベースに保存
+                        saved_prs = self._save_pr_data(repository, pr_data)
+                        total_prs_fetched += len(saved_prs)
+                        
+                        # 週次メトリクスを計算・保存
+                        weekly_metrics = self.aggregator.calculate_weekly_metrics(pr_data)
+                        self._save_weekly_metrics(repository, weekly_metrics)
+                        
+                except Exception as e:
+                    self.logger.error(f"Error fetching data for {repository}: {e}")
+                    continue
+            
+            duration_seconds = time.time() - start_time
+            
+            return {
+                'status': 'success',
+                'fetched_prs': total_prs_fetched,
+                'duration_seconds': duration_seconds
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error during period data fetch: {e}")
+            return {
+                'status': 'error',
+                'error': str(e),
+                'duration_seconds': time.time() - start_time
+            }

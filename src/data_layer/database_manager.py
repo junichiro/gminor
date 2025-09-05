@@ -232,3 +232,50 @@ class DatabaseManager:
             error_msg = f"Failed to retrieve merged pull requests: {e}"
             logger.error(error_msg)
             raise DatabaseError(error_msg)
+    
+    def cleanup_old_data(self, before_date: str) -> Dict[str, int]:
+        """
+        指定日以前の古いデータをクリーンアップする
+        
+        Args:
+            before_date: 削除対象の基準日（YYYY-MM-DD形式）
+            
+        Returns:
+            削除されたレコード数を含む辞書
+            
+        Raises:
+            DatabaseError: クリーンアップ処理に失敗した場合
+        """
+        try:
+            from datetime import datetime, timezone
+            from .models import PullRequest, WeeklyMetrics, SyncStatus
+            
+            # 日付をdatetimeオブジェクトに変換
+            cutoff_date = datetime.strptime(before_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+            
+            with self.get_session() as session:
+                # PRの削除
+                deleted_prs = session.query(PullRequest).filter(
+                    PullRequest.merged_at < cutoff_date
+                ).delete()
+                
+                # WeeklyMetricsの削除
+                deleted_metrics = session.query(WeeklyMetrics).filter(
+                    WeeklyMetrics.week_start_date < cutoff_date.date()
+                ).delete()
+                
+                # SyncStatusは削除しない（メンテナンス情報として保持）
+                
+                # 削除結果を記録
+                result = {
+                    'deleted_prs': deleted_prs,
+                    'deleted_metrics': deleted_metrics
+                }
+                
+                logger.info(f"Cleanup completed: {result}")
+                return result
+                
+        except Exception as e:
+            error_msg = f"Failed to cleanup old data: {e}"
+            logger.error(error_msg)
+            raise DatabaseError(error_msg)
