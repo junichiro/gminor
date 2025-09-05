@@ -258,6 +258,7 @@ class GitHubClient:
         """レート制限バッファをチェックし、必要に応じて待機
         
         残りリクエスト数がバッファ値を下回る場合、自動的に待機します。
+        重要なエラーは再発生させ、軽微なエラーのみログ出力します。
         """
         try:
             rate_status = self.get_rate_limit_status()
@@ -269,10 +270,21 @@ class GitHubClient:
                     f"(buffer: {self._rate_limit_buffer}). Waiting for reset..."
                 )
                 self.wait_for_rate_limit_reset()
+                
+        except RateLimitExceededException as e:
+            # レート制限エラーは重要なので再発生
+            logger.error(f"Rate limit exceeded during buffer check: {e}")
+            raise
+            
+        except GitHubAPIError as e:
+            # GitHub APIエラーは重要なので再発生
+            logger.error(f"GitHub API error during rate limit check: {e}")
+            raise
+            
         except Exception as e:
-            logger.error(f"Error checking rate limit: {e}")
+            # その他のエラーはログ出力のみ（処理継続）
+            logger.warning(f"Non-critical error checking rate limit: {e}")
     
-    @retry_on_rate_limit(max_retries=3, backoff_factor=1.0)
     def fetch_merged_prs(self, repo: str, since: datetime, until: Optional[datetime] = None) -> List[Dict[str, Any]]:
         """指定期間のマージ済みプルリクエストを取得
         
@@ -288,77 +300,7 @@ class GitHubClient:
             GitHubAPIError: リポジトリが存在しない、または一般的なAPI エラー
             RateLimitError: レート制限に達した場合
         """
-        if until is None:
-            until = datetime.now(timezone.utc)
-        
-        logger.info(f"Fetching merged PRs for {repo} from {since} to {until}")
-        
-        try:
-            repository = self._github.get_repo(repo)
-            
-            # クローズされたPRを取得（マージされたものを含む）
-            pulls = repository.get_pulls(
-                state="closed",
-                sort="updated", 
-                direction="desc"
-            )
-            
-            merged_prs = []
-            
-            for pr in pulls:
-                # マージされていないPRをスキップ
-                if pr.merged_at is None:
-                    continue
-                
-                # 指定期間外のPRをスキップ
-                if pr.merged_at < since or pr.merged_at > until:
-                    continue
-                
-                # PRデータを辞書形式で収集
-                pr_data = {
-                    "number": pr.number,
-                    "title": pr.title,
-                    "author": pr.user.login,
-                    "merged_at": pr.merged_at,
-                    "created_at": pr.created_at,
-                    "updated_at": pr.updated_at
-                }
-                
-                merged_prs.append(pr_data)
-                logger.debug(f"Found merged PR #{pr.number}: {pr.title}")
-            
-            logger.info(f"Found {len(merged_prs)} merged PRs for {repo}")
-            return merged_prs
-            
-        except UnknownObjectException as e:
-            error_msg = f"Repository not found: {repo}"
-            logger.error(error_msg)
-            raise GitHubAPIError(error_msg)
-            
-        except RateLimitExceededException as e:
-            # レート制限の詳細情報を取得
-            rate_limit_info = self._github.get_rate_limit().core
-            reset_time = rate_limit_info.reset
-            remaining = rate_limit_info.remaining
-            
-            error_msg = f"Rate limit exceeded. Resets at: {reset_time}, Remaining: {remaining}"
-            logger.error(error_msg)
-            raise RateLimitError(error_msg, reset_time=reset_time, remaining=remaining)
-            
-        except GithubException as e:
-            error_msg = f"GitHub API error: {e}"
-            logger.error(error_msg)
-            raise GitHubAPIError(error_msg, status_code=getattr(e, 'status', None), original_error=e)
-            
-        except requests.RequestException as e:
-            error_msg = f"Network error: {e}"
-            logger.error(error_msg)
-            raise GitHubAPIError(error_msg, original_error=e)
-            
-        except Exception as e:
-            error_msg = f"Unexpected error fetching PRs: {e}"
-            logger.error(error_msg)
-            raise GitHubAPIError(error_msg, original_error=e)
+        return self._fetch_merged_prs_impl(repo, since, until, show_progress=False)
     
     def fetch_merged_prs_with_progress(self, repo: str, since: datetime, until: Optional[datetime] = None, 
                                      show_progress: bool = True) -> List[Dict[str, Any]]:
@@ -377,10 +319,29 @@ class GitHubClient:
             GitHubAPIError: リポジトリが存在しない、または一般的なAPI エラー
             RateLimitError: レート制限に達した場合
         """
+        return self._fetch_merged_prs_impl(repo, since, until, show_progress)
+    
+    def _fetch_merged_prs_impl(self, repo: str, since: datetime, until: Optional[datetime], show_progress: bool) -> List[Dict[str, Any]]:
+        """マージ済みPR取得の実装（ページネーション対応・リトライ機能付き）
+        
+        Args:
+            repo: リポジトリ名（"owner/repo"形式）
+            since: 開始日時（UTC）
+            until: 終了日時（UTC、Noneの場合は現在時刻）
+            show_progress: 進捗バーを表示するかどうか
+            
+        Returns:
+            List[Dict[str, Any]]: マージ済みPRのリスト
+            
+        Raises:
+            GitHubAPIError: リポジトリが存在しない、または一般的なAPI エラー
+            RateLimitError: レート制限に達した場合
+        """
         if until is None:
             until = datetime.now(timezone.utc)
         
-        logger.info(f"Fetching merged PRs for {repo} from {since} to {until} with progress display")
+        progress_msg = "with progress display" if show_progress else "without progress display"
+        logger.info(f"Fetching merged PRs for {repo} from {since} to {until} {progress_msg}")
         
         try:
             repository = self._github.get_repo(repo)
@@ -394,33 +355,50 @@ class GitHubClient:
             
             merged_prs = []
             
-            # 進捗バー設定 - 実際の総数は不明なので、処理済み数で表示
+            # 進捗バー設定
             progress_desc = f"Processing PRs from {repo}"
             with tqdm(desc=progress_desc, unit="PR", disable=not show_progress) as pbar:
                 for pr in pulls:
-                    # マージされていないPRをスキップ
-                    if pr.merged_at is None:
+                    try:
+                        # レート制限バッファチェック
+                        self.check_rate_limit_and_wait_if_needed()
+                        
+                        # マージされていないPRをスキップ
+                        if pr.merged_at is None:
+                            continue
+                        
+                        # 指定期間外のPRをスキップ
+                        if pr.merged_at < since or pr.merged_at > until:
+                            continue
+                        
+                        # PRデータを辞書形式で収集
+                        pr_data = {
+                            "number": pr.number,
+                            "title": pr.title,
+                            "author": pr.user.login,
+                            "merged_at": pr.merged_at,
+                            "created_at": pr.created_at,
+                            "updated_at": pr.updated_at
+                        }
+                        
+                        merged_prs.append(pr_data)
+                        if show_progress:
+                            pbar.update(1)
+                            pbar.set_postfix({"Found": len(merged_prs)})
+                        
+                        logger.debug(f"Found merged PR #{pr.number}: {pr.title}")
+                        
+                    except RateLimitExceededException as e:
+                        logger.info(f"Rate limit exceeded while processing PR, waiting for reset...")
+                        self.wait_for_rate_limit_reset()
+                        # レート制限後は同じPRから継続（for文が自動的に次のPRに進む）
                         continue
-                    
-                    # 指定期間外のPRをスキップ
-                    if pr.merged_at < since or pr.merged_at > until:
+                        
+                    except requests.RequestException as e:
+                        logger.warning(f"Network error while processing PR: {e}. Retrying...")
+                        # ネットワークエラーの場合は短い待機後に継続
+                        time.sleep(1)
                         continue
-                    
-                    # PRデータを辞書形式で収集
-                    pr_data = {
-                        "number": pr.number,
-                        "title": pr.title,
-                        "author": pr.user.login,
-                        "merged_at": pr.merged_at,
-                        "created_at": pr.created_at,
-                        "updated_at": pr.updated_at
-                    }
-                    
-                    merged_prs.append(pr_data)
-                    pbar.update(1)
-                    pbar.set_postfix({"Found": len(merged_prs)})
-                    
-                    logger.debug(f"Found merged PR #{pr.number}: {pr.title}")
             
             logger.info(f"Found {len(merged_prs)} merged PRs for {repo}")
             return merged_prs
@@ -431,12 +409,12 @@ class GitHubClient:
             raise GitHubAPIError(error_msg)
             
         except RateLimitExceededException as e:
-            # レート制限の詳細情報を取得
+            # 初期のリポジトリ取得やPRリスト取得で発生したレート制限
             rate_limit_info = self._github.get_rate_limit().core
             reset_time = rate_limit_info.reset
             remaining = rate_limit_info.remaining
             
-            error_msg = f"Rate limit exceeded. Resets at: {reset_time}, Remaining: {remaining}"
+            error_msg = f"Rate limit exceeded during initial repository access. Resets at: {reset_time}, Remaining: {remaining}"
             logger.error(error_msg)
             raise RateLimitError(error_msg, reset_time=reset_time, remaining=remaining)
             
