@@ -411,5 +411,9 @@ class TestMovingAverageCalculation:
             # productivity カラムが存在しない
         })
         
-        with pytest.raises(KeyError):
+        with pytest.raises(KeyError) as exc_info:
             aggregator.calculate_moving_average(invalid_data)
+        
+        # エラーメッセージが日本語であることを確認
+        assert "productivity" in str(exc_info.value)
+        assert "カラム" in str(exc_info.value)

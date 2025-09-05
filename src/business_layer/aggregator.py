@@ -120,6 +120,6 @@ class ProductivityAggregator:
             return pd.Series(dtype=float)
         
         if 'productivity' not in df.columns:
-            raise KeyError("DataFrame must contain 'productivity' column")
+            raise KeyError("DataFrameには'productivity'カラムが含まれていません")
         
         return df['productivity'].rolling(window=window, min_periods=window).mean()

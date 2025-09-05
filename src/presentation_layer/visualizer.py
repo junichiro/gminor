@@ -30,13 +30,14 @@ class ProductivityVisualizer:
         """
         self.timezone_handler = timezone_handler
     
-    def create_productivity_chart(self, weekly_data: pd.DataFrame) -> str:
+    def create_productivity_chart(self, weekly_data: pd.DataFrame, moving_average_window: int = 4) -> str:
         """
         週次生産性グラフを生成してHTMLを返す
         
         Args:
             weekly_data: 週次データのDataFrame（ProductivityAggregatorの出力）
                 必要な列: week_start, week_end, pr_count, unique_authors, productivity
+            moving_average_window: 移動平均のウィンドウサイズ（デフォルト: 4週）
         
         Returns:
             Plotlyで生成されたHTMLファイルの文字列
@@ -56,7 +57,7 @@ class ProductivityVisualizer:
         x_data, y_data, ma_data = self._prepare_chart_data(weekly_data)
         
         # グラフの作成
-        fig = self._create_figure(x_data, y_data, ma_data)
+        fig = self._create_figure(x_data, y_data, ma_data, moving_average_window)
         
         # レイアウトの適用
         self._apply_layout(fig)
@@ -108,13 +109,11 @@ class ProductivityVisualizer:
         y_data = weekly_data['productivity'].tolist()
         
         # 移動平均データ（存在する場合）
-        ma_data = []
-        if 'moving_average' in weekly_data.columns:
-            ma_data = weekly_data['moving_average'].tolist()
+        ma_data = weekly_data['moving_average'].tolist() if 'moving_average' in weekly_data.columns else []
         
         return x_data, y_data, ma_data
     
-    def _create_figure(self, x_data: List[str], y_data: List[float], ma_data: List[float] = None) -> go.Figure:
+    def _create_figure(self, x_data: List[str], y_data: List[float], ma_data: List[float] = None, moving_average_window: int = 4) -> go.Figure:
         """
         Plotly図表オブジェクトを作成
         
@@ -150,7 +149,7 @@ class ProductivityVisualizer:
                 x=x_data,
                 y=ma_data,
                 mode='lines',
-                name='4週移動平均',
+                name=f'{moving_average_window}週移動平均',
                 line=dict(
                     color=self.CHART_CONFIG['moving_average_color'],
                     width=self.CHART_CONFIG['line_width'],
@@ -184,7 +183,7 @@ class ProductivityVisualizer:
             空のチャートのHTML文字列
         """
         # 空のデータでグラフを作成
-        fig = self._create_figure([], [], [])
+        fig = self._create_figure([], [], [], 4)
         
         # 基本レイアウトを適用
         self._apply_layout(fig)

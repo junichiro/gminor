@@ -1,6 +1,7 @@
 """ProductivityVisualizerのテスト"""
 import pytest
 import pandas as pd
+import numpy as np
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
@@ -272,7 +273,7 @@ class TestMovingAverageVisualization:
             'pr_count': [10, 15, 12, 18, 20, 14],
             'unique_authors': [5, 6, 4, 8, 10, 7],
             'productivity': [2.0, 2.5, 3.0, 2.25, 2.0, 2.0],
-            'moving_average': [float('nan'), float('nan'), float('nan'), 2.4375, 2.1875, 2.1875]
+            'moving_average': [np.nan, np.nan, np.nan, 2.4375, 2.1875, 2.1875]
         })
     
     def test_移動平均付きのグラフが生成される(self, visualizer, sample_data_with_moving_average):

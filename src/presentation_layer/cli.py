@@ -275,10 +275,11 @@ def visualize(ctx):
         click.echo(f"📈 {len(weekly_data)}週分のデータを可視化します...")
         
         # 4週移動平均を計算して追加
-        weekly_data['moving_average'] = aggregator.calculate_moving_average(weekly_data)
+        moving_average_window = 4  # デフォルトのウィンドウサイズ
+        weekly_data['moving_average'] = aggregator.calculate_moving_average(weekly_data, window=moving_average_window)
         
-        # グラフ生成
-        html_content = visualizer.create_productivity_chart(weekly_data)
+        # グラフ生成（ウィンドウサイズを渡す）
+        html_content = visualizer.create_productivity_chart(weekly_data, moving_average_window=moving_average_window)
         
         # 出力ディレクトリとファイルパスの準備
         output_config = config.get('application', {}).get('output', {})
