@@ -131,28 +131,25 @@ class MetricsService:
         """
         try:
             with self.db_manager.get_session() as session:
-                # リポジトリごとのPR数と貢献者数を集計
+                # リポジトリごとのPR数と貢献者数を集計（N+1問題を解消）
                 from sqlalchemy import func, distinct
                 from ..data_layer.models import PullRequest
                 
-                repo_stats = {}
-                
-                # 各リポジトリの統計を取得
-                repo_names = session.query(PullRequest.repo_name).distinct().all()
-                
-                for (repo_name,) in repo_names:
-                    pr_count = session.query(func.count(PullRequest.id)).filter(
-                        PullRequest.repo_name == repo_name
-                    ).scalar()
-                    
-                    unique_authors = session.query(func.count(distinct(PullRequest.author))).filter(
-                        PullRequest.repo_name == repo_name
-                    ).scalar()
-                    
-                    repo_stats[repo_name] = {
-                        'pr_count': pr_count,
-                        'unique_authors': unique_authors
-                    }
+                # 単一のクエリですべてのリポジトリの統計を取得
+                repo_stats_query = (
+                    session.query(
+                        PullRequest.repo_name,
+                        func.count(PullRequest.id).label("pr_count"),
+                        func.count(distinct(PullRequest.author)).label("unique_authors")
+                    )
+                    .group_by(PullRequest.repo_name)
+                    .all()
+                )
+
+                repo_stats = {
+                    repo_name: {"pr_count": pr_count, "unique_authors": unique_authors}
+                    for repo_name, pr_count, unique_authors in repo_stats_query
+                }
                 
                 return repo_stats
                 

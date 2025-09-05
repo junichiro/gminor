@@ -359,7 +359,6 @@ def fetch(ctx, from_date: str, to_date: str):
     
     try:
         sync_manager = services['sync_manager']
-        # fetch_period_dataメソッドを使用（後で実装）
         result = sync_manager.fetch_period_data(repositories, from_date, to_date)
         
         if result['status'] == 'success':
@@ -400,16 +399,15 @@ def stats(ctx):
         click.echo(f"🔝 最高生産性: {summary['max_productivity']:.2f}")
         click.echo(f"🔻 最低生産性: {summary['min_productivity']:.2f}")
         
-        # リポジトリ別統計を取得（メソッドを後で実装）
-        if hasattr(metrics_service, 'get_repository_stats'):
-            repo_stats = metrics_service.get_repository_stats()
-            if repo_stats:
-                click.echo("\n📂 リポジトリ別統計")
-                click.echo("-" * 50)
-                for repo_name, stats in repo_stats.items():
-                    click.echo(f"\n{repo_name}:")
-                    click.echo(f"  PR数: {stats.get('pr_count', 0)}")
-                    click.echo(f"  貢献者数: {stats.get('unique_authors', 0)}")
+        # リポジトリ別統計を取得
+        repo_stats = metrics_service.get_repository_stats()
+        if repo_stats:
+            click.echo("\n📂 リポジトリ別統計")
+            click.echo("-" * 50)
+            for repo_name, stats in repo_stats.items():
+                click.echo(f"\n{repo_name}:")
+                click.echo(f"  PR数: {stats.get('pr_count', 0)}")
+                click.echo(f"  貢献者数: {stats.get('unique_authors', 0)}")
         
     except Exception as e:
         raise click.ClickException(f"統計情報の取得中にエラーが発生しました: {str(e)}")
@@ -441,18 +439,11 @@ def cleanup(ctx, before: str, yes: bool):
     timezone_handler, github_client, db_manager, aggregator = ctx.obj['components']
     
     try:
-        # cleanup_old_dataメソッドを使用（後で実装）
-        if hasattr(db_manager, 'cleanup_old_data'):
-            result = db_manager.cleanup_old_data(before)
-            
-            click.echo(f"✅ クリーンアップが完了しました")
-            click.echo(f"🗑️  削除されたPR: {result.get('deleted_prs', 0)}件")
-            click.echo(f"📊 削除されたメトリクス: {result.get('deleted_metrics', 0)}件")
-        else:
-            # 一時的な実装（後で改善）
-            click.echo("✅ クリーンアップが完了しました")
-            click.echo("🗑️  削除されたPR: 0件")
-            click.echo("📊 削除されたメトリクス: 0件")
+        result = db_manager.cleanup_old_data(before)
+        
+        click.echo(f"✅ クリーンアップが完了しました")
+        click.echo(f"🗑️  削除されたPR: {result.get('deleted_prs', 0)}件")
+        click.echo(f"📊 削除されたメトリクス: {result.get('deleted_metrics', 0)}件")
             
     except Exception as e:
         raise click.ClickException(f"クリーンアップ中にエラーが発生しました: {str(e)}")

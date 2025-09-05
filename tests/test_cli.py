@@ -434,7 +434,7 @@ class TestAdditionalCLICommands:
                         'deleted_metrics': 20
                     }
                     
-                    result = runner.invoke(cli, ['cleanup', '--before', '2023-01-01'])
+                    result = runner.invoke(cli, ['cleanup', '--before', '2023-01-01', '--yes'])
                     
                     assert result.exit_code == 0
                     assert 'データベースのクリーンアップを開始' in result.output

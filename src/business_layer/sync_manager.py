@@ -503,14 +503,12 @@ class SyncManager:
             
             for repository in repositories:
                 try:
-                    # 期間指定でPRを取得
-                    pr_data = []
-                    all_prs = self.github_client.fetch_merged_prs(repo=repository, since=start_datetime)
-                    
-                    # 期間内のPRのみフィルタリング
-                    for pr in all_prs:
-                        if pr['merged_at'] <= end_datetime:
-                            pr_data.append(pr)
+                    # 期間指定でPRを取得（APIレベルでフィルタリング）
+                    pr_data = self.github_client.fetch_merged_prs(
+                        repo=repository, 
+                        since=start_datetime, 
+                        until=end_datetime
+                    )
                     
                     if pr_data:
                         # データベースに保存
