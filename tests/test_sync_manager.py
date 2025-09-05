@@ -543,19 +543,5 @@ class TestIncrementalSync:
         assert mock_github_client.fetch_merged_prs.call_count == 3
 
 
-class TestUpdateSyncCommand:
-    """updateコマンドのテスト"""
-    
-    def test_update_コマンドがCLIに追加されている(self):
-        """正常系: updateコマンドがCLIに追加されていることを確認"""
-        # CLIファイルをテキストとして読み取って確認
-        from pathlib import Path
-        
-        cli_path = Path(__file__).parent.parent / 'src' / 'presentation_layer' / 'cli.py'
-        with open(cli_path, 'r', encoding='utf-8') as f:
-            cli_content = f.read()
-        
-        # update関数とコマンドデコレータが存在することを確認
-        assert 'def update(ctx):' in cli_content
-        assert '@cli.command()' in cli_content
-        assert '差分データ同期を実行' in cli_content
+# TestUpdateSyncCommandクラスを削除
+# より堅牢なCLI統合テストはtest_cli_integration.pyに存在する

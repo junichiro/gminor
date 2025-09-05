@@ -234,7 +234,6 @@ def update(ctx):
         _display_sync_result(result)
         
     except Exception as e:
-        db_manager.close()
         raise click.ClickException(f"差分同期処理中にエラーが発生しました: {str(e)}")
     finally:
         # リソースのクリーンアップ

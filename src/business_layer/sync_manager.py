@@ -272,28 +272,32 @@ class SyncManager:
     def _update_sync_status(self, repository: str, status: str, 
                           error_message: Optional[str] = None) -> None:
         """
-        同期ステータスを更新
+        同期ステータスを更新（legacy interface、内部でupdate_sync_statusを使用）
         
         Args:
             repository: リポジトリ名
             status: 同期ステータス
             error_message: エラーメッセージ（エラー時のみ）
         """
-        with self.db_manager.get_session() as session:
-            sync_status = session.query(SyncStatus).filter_by(
-                repo_name=repository
-            ).first()
-            
-            if not sync_status:
-                sync_status = SyncStatus(repo_name=repository)
-                session.add(sync_status)
-            
-            sync_status.status = status
-            sync_status.last_synced_at = datetime.now(timezone.utc)
-            if error_message:
-                sync_status.error_message = error_message
-            
-            session.commit()
+        if status == 'completed':
+            self.update_sync_status(repository, {'success': True})
+        elif status == 'error':
+            self.update_sync_status(repository, {'success': False, 'error_message': error_message or 'Unknown error'})
+        else:
+            # その他のステータス（'in_progress'等）は直接処理
+            with self.db_manager.get_session() as session:
+                sync_status = session.query(SyncStatus).filter_by(
+                    repo_name=repository
+                ).first()
+                
+                if not sync_status:
+                    sync_status = SyncStatus(repo_name=repository)
+                    session.add(sync_status)
+                
+                sync_status.status = status
+                sync_status.last_synced_at = datetime.now(timezone.utc)
+                
+                session.commit()
     
     def update_sync(self, repositories: List[str]) -> Dict[str, Any]:
         """
@@ -406,6 +410,7 @@ class SyncManager:
             except (GitHubAPIError, Exception) as e:
                 error_message = f"Error during incremental sync for {repository}: {e}"
                 self.logger.error(error_message)
+                self.update_sync_status(repository, {'success': False, 'error_message': str(e)})
                 failed_repositories.append(repository)
                 # エラーが発生しても他のリポジトリの処理は継続
                 continue
