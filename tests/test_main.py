@@ -114,8 +114,14 @@ class TestMainEntryPoint:
                 # main関数を実行
                 result = main.main()
                 
-                # CLIが呼び出されたことを確認
+                # CLIが適切な依存関係と共に呼び出されたことを確認
                 mock_cli.assert_called_once()
+                # objパラメータが渡されていることを確認
+                call_args = mock_cli.call_args
+                assert 'obj' in call_args.kwargs
+                assert 'components' in call_args.kwargs['obj']
+                assert 'services' in call_args.kwargs['obj']
+                assert 'config' in call_args.kwargs['obj']
                 
         except ImportError:
             pytest.fail("main.py module could not be imported")
@@ -270,22 +276,41 @@ class TestIntegrationScenarios:
                 'application': {'timezone': 'Asia/Tokyo'}
             }
             
-            with patch('main.load_and_validate_config') as mock_load_config, \
-                 patch('main.create_app_components') as mock_create_components, \
+            # モックコンポーネントとサービスを設定
+            mock_components = Mock()
+            mock_components.timezone_handler = Mock()
+            mock_components.github_client = Mock()
+            mock_components.db_manager = Mock()
+            mock_components.aggregator = Mock()
+            mock_components.config = mock_config
+            
+            mock_services = Mock()
+            mock_services.sync_manager = Mock()
+            mock_services.metrics_service = Mock()
+            mock_services.visualizer = Mock()
+            
+            with patch('main.create_app_components') as mock_create_components, \
                  patch('main.create_services') as mock_create_services, \
                  patch('main.cli') as mock_cli:
                 
-                mock_load_config.return_value = mock_config
-                mock_create_components.return_value = Mock()
-                mock_create_services.return_value = Mock()
+                mock_create_components.return_value = mock_components
+                mock_create_services.return_value = mock_services
                 
                 # main関数を実行
                 main.main()
                 
                 # 各フェーズが順序通りに実行されることを確認
-                mock_load_config.assert_called_once()
                 mock_create_components.assert_called_once()
+                mock_create_services.assert_called_once_with(mock_components)
                 mock_cli.assert_called_once()
+                
+                # CLIに適切な依存関係が渡されることを確認
+                call_args = mock_cli.call_args
+                assert 'obj' in call_args.kwargs
+                injected_obj = call_args.kwargs['obj']
+                assert 'components' in injected_obj
+                assert 'services' in injected_obj
+                assert 'config' in injected_obj
                 
         except ImportError:
             pytest.fail("main.py module could not be imported")

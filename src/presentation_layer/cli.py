@@ -88,21 +88,70 @@ def create_components(config: Dict[str, Any]) -> tuple[TimezoneHandler, GitHubCl
         raise click.ClickException(f"コンポーネントの初期化に失敗しました: {str(e)}")
 
 
+def create_services_from_components(
+    timezone_handler: TimezoneHandler,
+    github_client: GitHubClient, 
+    db_manager: DatabaseManager,
+    aggregator: ProductivityAggregator
+) -> Dict[str, Any]:
+    """コンポーネントからサービス層を作成する（CLIの独立実行用）
+    
+    Args:
+        timezone_handler: タイムゾーンハンドラー
+        github_client: GitHubクライアント
+        db_manager: データベースマネージャー
+        aggregator: プロダクティビティアグリゲーター
+        
+    Returns:
+        Dict[str, Any]: 作成されたサービス群
+        
+    Raises:
+        click.ClickException: サービス作成エラー
+    """
+    try:
+        sync_manager = SyncManager(github_client, db_manager, aggregator)
+        metrics_service = MetricsService(db_manager, timezone_handler)
+        visualizer = ProductivityVisualizer(timezone_handler)
+        
+        return {
+            'sync_manager': sync_manager,
+            'metrics_service': metrics_service,
+            'visualizer': visualizer
+        }
+        
+    except Exception as e:
+        raise click.ClickException(f"サービスの初期化に失敗しました: {str(e)}")
+
+
 @click.group()
-def cli():
+@click.pass_context
+def cli(ctx):
     """GitHub生産性メトリクス可視化ツール"""
-    pass
+    # コンテキストオブジェクトが存在しない場合は独立実行モード
+    if ctx.obj is None:
+        ctx.ensure_object(dict)
+        # 独立実行時のみコンポーネントを作成
+        config = load_config_and_validate()
+        components = create_components(config)
+        services = create_services_from_components(*components)
+        ctx.obj = {
+            'components': components,
+            'services': services,
+            'config': config
+        }
 
 
 @cli.command()
 @click.option('--days', default=180, help='取得期間（日）', type=int)
-def init(days: int):
+@click.pass_context
+def init(ctx, days: int):
     """初回データ取得"""
     click.echo("初期データ同期を開始しています...")
     
-    # 設定読み込みとコンポーネント初期化
-    config = load_config_and_validate()
-    timezone_handler, github_client, db_manager, aggregator = create_components(config)
+    # コンテキストから依存関係を取得
+    config = ctx.obj['config']
+    timezone_handler, github_client, db_manager, aggregator = ctx.obj['components']
+    services = ctx.obj['services']
     
     # リポジトリ設定の確認
     repositories = config['github'].get('repositories', [])
@@ -113,8 +162,8 @@ def init(days: int):
         )
     
     try:
-        # SyncManagerによる初期データ同期
-        sync_manager = SyncManager(github_client, db_manager, aggregator)
+        # 注入されたSyncManagerを使用
+        sync_manager = services['sync_manager']
         result = sync_manager.initial_sync(repositories, days_back=days, progress=True)
         
         # 結果の表示
@@ -158,40 +207,30 @@ def _display_sync_result(result: Dict[str, Any]) -> None:
 
 
 @cli.command()
-def visualize():
+@click.pass_context
+def visualize(ctx):
     """可視化のみ実行"""
     click.echo("📊 グラフ生成を開始しています...")
     
-    # 設定読み込み（GitHub APIトークンは不要なので簡易版）
-    try:
-        config_loader = ConfigLoader()
-        config = config_loader.load_config('config.yaml')
-    except Exception as e:
-        raise click.ClickException(f"設定ファイルの読み込みに失敗しました: {str(e)}")
+    # コンテキストから依存関係を取得
+    config = ctx.obj['config']
+    timezone_handler, github_client, db_manager, aggregator = ctx.obj['components']
+    services = ctx.obj['services']
     
-    # 必要なコンポーネントの初期化
-    try:
-        timezone_handler = TimezoneHandler(config.get('application', {}).get('timezone', 'Asia/Tokyo'))
-        
-        # データベース設定からSQLiteパスを構築
-        db_config = config.get('database', {})
-        db_path = f"data/{db_config.get('name', 'gminor_db')}.sqlite"
-        
-        # データベースファイルの存在確認
-        if not Path(db_path).exists():
-            raise click.ClickException(
-                f"データベースファイルが見つかりません: {db_path}\n"
-                "まず 'init' コマンドを実行してデータを取得してください。"
-            )
-        
-        db_manager = DatabaseManager(db_path)
-        visualizer = ProductivityVisualizer(timezone_handler)
-        metrics_service = MetricsService(db_manager, timezone_handler)
-        
-    except Exception as e:
-        raise click.ClickException(f"コンポーネントの初期化に失敗しました: {str(e)}")
+    # データベースファイルの存在確認
+    db_config = config.get('database', {})
+    db_path = f"data/{db_config.get('name', 'gminor_db')}.sqlite"
+    if not Path(db_path).exists():
+        raise click.ClickException(
+            f"データベースファイルが見つかりません: {db_path}\n"
+            "まず 'init' コマンドを実行してデータを取得してください。"
+        )
     
     try:
+        # 注入されたサービスを使用
+        metrics_service = services['metrics_service']
+        visualizer = services['visualizer']
+        
         # ビジネス層から週次メトリクスを取得
         weekly_data = metrics_service.get_weekly_metrics()
         

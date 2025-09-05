@@ -194,8 +194,21 @@ def main():
         components = create_app_components()
         services = create_services(components)
         
-        # CLI実行
-        cli()
+        # 依存関係をCLIに注入して実行
+        cli(obj={
+            'components': (
+                components.timezone_handler,
+                components.github_client, 
+                components.db_manager,
+                components.aggregator
+            ),
+            'services': {
+                'sync_manager': services.sync_manager,
+                'metrics_service': services.metrics_service,
+                'visualizer': services.visualizer
+            },
+            'config': components.config
+        })
         
     except Exception as e:
         logger.error(f"Application startup failed: {e}")
