@@ -196,19 +196,20 @@ class TestVisualizeCommand:
         })
     
     @patch('src.presentation_layer.cli.ConfigLoader')
+    @patch('src.presentation_layer.cli.MetricsService')
     @patch('src.presentation_layer.cli.DatabaseManager')
     @patch('src.presentation_layer.cli.ProductivityVisualizer')
     @patch('src.presentation_layer.cli.TimezoneHandler')
     def test_visualizeコマンドが正常に実行される(
         self, mock_timezone_handler, mock_visualizer, mock_db_manager,
-        mock_config_loader, runner, mock_weekly_data
+        mock_metrics_service, mock_config_loader, runner, mock_weekly_data
     ):
         """正常系: visualizeコマンドが正常に実行されることを確認"""
         # モック設定
         mock_config_loader.return_value.load_config.return_value = {
             'application': {'timezone': 'Asia/Tokyo'}
         }
-        mock_db_manager.return_value.get_weekly_metrics.return_value = mock_weekly_data
+        mock_metrics_service.return_value.get_weekly_metrics.return_value = mock_weekly_data
         mock_html_content = '<html><div>Mock Chart</div></html>'
         mock_visualizer.return_value.create_productivity_chart.return_value = mock_html_content
         
@@ -235,12 +236,13 @@ class TestVisualizeCommand:
         assert 'Config file not found' in result.output
     
     @patch('src.presentation_layer.cli.ConfigLoader')
+    @patch('src.presentation_layer.cli.MetricsService')
     @patch('src.presentation_layer.cli.DatabaseManager')
     @patch('src.presentation_layer.cli.ProductivityVisualizer')
     @patch('src.presentation_layer.cli.TimezoneHandler')
     def test_visualizeコマンドで空データが適切に処理される(
         self, mock_timezone_handler, mock_visualizer, mock_db_manager,
-        mock_config_loader, runner
+        mock_metrics_service, mock_config_loader, runner
     ):
         """正常系: 空データ時に適切なメッセージが表示されることを確認"""
         import pandas as pd
@@ -249,7 +251,7 @@ class TestVisualizeCommand:
             'application': {'timezone': 'Asia/Tokyo'}
         }
         empty_data = pd.DataFrame()
-        mock_db_manager.return_value.get_weekly_metrics.return_value = empty_data
+        mock_metrics_service.return_value.get_weekly_metrics.return_value = empty_data
         
         result = runner.invoke(visualize)
         
@@ -257,21 +259,19 @@ class TestVisualizeCommand:
         assert 'データがありません' in result.output
     
     @patch('src.presentation_layer.cli.ConfigLoader')
+    @patch('src.presentation_layer.cli.MetricsService')
     @patch('src.presentation_layer.cli.DatabaseManager')
     @patch('src.presentation_layer.cli.ProductivityVisualizer')
     @patch('src.presentation_layer.cli.TimezoneHandler')
     def test_visualizeコマンドでHTMLファイル保存が確認される(
         self, mock_timezone_handler, mock_visualizer, mock_db_manager,
-        mock_config_loader, runner, mock_weekly_data, tmp_path
+        mock_metrics_service, mock_config_loader, runner, mock_weekly_data, tmp_path
     ):
-        """正常系: HTMLファイルが正しく保存されることを確認"""
-        # 一時ディレクトリを出力先として設定
-        output_path = tmp_path / "productivity_chart.html"
-        
+        """正常系: HTMLファイルが正しく保存されることを確認"""        
         mock_config_loader.return_value.load_config.return_value = {
             'application': {'timezone': 'Asia/Tokyo'}
         }
-        mock_db_manager.return_value.get_weekly_metrics.return_value = mock_weekly_data
+        mock_metrics_service.return_value.get_weekly_metrics.return_value = mock_weekly_data
         mock_html_content = '<html><div>Mock Chart</div></html>'
         mock_visualizer.return_value.create_productivity_chart.return_value = mock_html_content
         

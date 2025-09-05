@@ -12,12 +12,33 @@ logging:
 github:
   api_base_url: https://api.github.com
   timeout: 30
-  # API token should be set via environment variable: GITHUB_TOKEN
-  api_token: ${GITHUB_TOKEN}
+  
+  # GitHub API Personal Access Token
+  # セキュリティのため、環境変数 GITHUB_TOKEN で設定してください
+  # 必要な権限: repo (private repositories), public_repo (public repositories)
+  # 取得方法: GitHub Settings -> Developer settings -> Personal access tokens
+  
+  # 分析対象のリポジトリリスト
+  # 形式: "owner/repository-name"
   repositories:
-    - junichiro/gminor  # example repository - update with actual repositories
+    - junichiro/gminor  # 例: このリポジトリ自体
+    # - organization/backend-api     # 例: 組織のバックエンドAPI
+    # - organization/frontend-app    # 例: 組織のフロントエンドアプリ
+    # - username/personal-project    # 例: 個人プロジェクト
 
 application:
   name: gminor
   version: 1.0.0
   environment: development
+  
+  # タイムゾーン設定
+  # グラフの日付表示に使用されます
+  # 例: "Asia/Tokyo", "America/New_York", "Europe/London", "UTC"
+  timezone: Asia/Tokyo
+  
+  # 出力設定
+  output:
+    # HTMLファイルの出力ディレクトリ
+    directory: output
+    # グラフファイル名
+    filename: productivity_chart.html

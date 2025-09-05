@@ -7,7 +7,7 @@ import logging
 import os
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator, Optional
+from typing import Generator, Optional, List, Dict, Any
 
 from sqlalchemy import create_engine, Engine
 from sqlalchemy.orm import sessionmaker, Session, scoped_session
@@ -188,23 +188,20 @@ class DatabaseManager:
             logger.error(f"Database health check failed: {e}")
             return False
     
-    def get_weekly_metrics(self) -> 'pandas.DataFrame':
-        """週次メトリクスデータを取得
+    def get_merged_pull_requests(self) -> List[Dict[str, Any]]:
+        """マージされたプルリクエストデータを取得
         
-        データベースからプルリクエストデータを取得し、
-        ProductivityVisualizerで使用可能な形式の週次メトリクスを計算して返します。
+        データベースからマージされたプルリクエストの基本情報を取得します。
+        ビジネス層で使用するためのデータのみを提供します。
         
         Returns:
-            pandas.DataFrame: 週次メトリクスのDataFrame
-                必要な列: week_start, week_end, pr_count, unique_authors, productivity
+            List[Dict[str, Any]]: プルリクエストデータのリスト
+                各要素は {'merged_at': datetime, 'author': str, 'number': int} 形式
         
         Raises:
             DatabaseError: データ取得に失敗した場合
         """
         try:
-            import pandas as pd
-            from datetime import datetime, timezone, timedelta
-            from sqlalchemy import func, and_
             from .models import PullRequest
             
             with self.get_session() as session:
@@ -219,10 +216,6 @@ class DatabaseManager:
                 
                 results = query.all()
                 
-                if not results:
-                    # 空のDataFrameを返す
-                    return pd.DataFrame(columns=['week_start', 'week_end', 'pr_count', 'unique_authors', 'productivity'])
-                
                 # プルリクエストデータをリスト形式に変換
                 pr_data = []
                 for merged_at, author, pr_number in results:
@@ -232,20 +225,10 @@ class DatabaseManager:
                         'number': pr_number
                     })
                 
-                # ProductivityAggregatorと同様の処理でweekly_dataを作成
-                from ..business_layer.aggregator import ProductivityAggregator
-                from ..business_layer.timezone_handler import TimezoneHandler
-                
-                # デフォルトのタイムゾーンハンドラーを使用
-                timezone_handler = TimezoneHandler()
-                aggregator = ProductivityAggregator(timezone_handler)
-                
-                weekly_metrics = aggregator.calculate_weekly_metrics(pr_data)
-                
-                logger.info(f"Retrieved {len(weekly_metrics)} weeks of metrics data")
-                return weekly_metrics
+                logger.info(f"Retrieved {len(pr_data)} merged pull requests")
+                return pr_data
                 
         except Exception as e:
-            error_msg = f"Failed to retrieve weekly metrics: {e}"
+            error_msg = f"Failed to retrieve merged pull requests: {e}"
             logger.error(error_msg)
             raise DatabaseError(error_msg)

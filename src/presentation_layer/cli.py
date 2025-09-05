@@ -12,6 +12,7 @@ from ..business_layer.config_loader import ConfigLoader
 from ..business_layer.sync_manager import SyncManager
 from ..business_layer.timezone_handler import TimezoneHandler
 from ..business_layer.aggregator import ProductivityAggregator
+from ..business_layer.metrics_service import MetricsService, MetricsServiceError
 from ..data_layer.github_client import GitHubClient
 from ..data_layer.database_manager import DatabaseManager
 from .visualizer import ProductivityVisualizer
@@ -185,13 +186,14 @@ def visualize():
         
         db_manager = DatabaseManager(db_path)
         visualizer = ProductivityVisualizer(timezone_handler)
+        metrics_service = MetricsService(db_manager, timezone_handler)
         
     except Exception as e:
         raise click.ClickException(f"コンポーネントの初期化に失敗しました: {str(e)}")
     
     try:
-        # データベースから週次メトリクスを取得
-        weekly_data = db_manager.get_weekly_metrics()
+        # ビジネス層から週次メトリクスを取得
+        weekly_data = metrics_service.get_weekly_metrics()
         
         if weekly_data.empty:
             click.echo("📭 データがありません。まず 'init' コマンドを実行してデータを取得してください。")
@@ -203,9 +205,12 @@ def visualize():
         html_content = visualizer.create_productivity_chart(weekly_data)
         
         # 出力ディレクトリとファイルパスの準備
-        output_dir = Path('output')
+        output_config = config.get('application', {}).get('output', {})
+        output_dir = Path(output_config.get('directory', 'output'))
+        output_filename = output_config.get('filename', 'productivity_chart.html')
+        
         output_dir.mkdir(exist_ok=True)
-        output_path = output_dir / 'productivity_chart.html'
+        output_path = output_dir / output_filename
         
         # HTMLファイルとして保存
         with open(output_path, 'w', encoding='utf-8') as f:
@@ -214,8 +219,14 @@ def visualize():
         click.echo(f"✅ グラフが正常に生成されました: {output_path}")
         click.echo(f"🌐 ブラウザで開いてご確認ください。")
         
+    except MetricsServiceError as e:
+        raise click.ClickException(f"メトリクス計算中にエラーが発生しました: {str(e)}")
+    except FileNotFoundError as e:
+        raise click.ClickException(f"ファイル操作エラー: {str(e)}")
+    except PermissionError as e:
+        raise click.ClickException(f"ファイル書き込み権限エラー: {str(e)}")
     except Exception as e:
-        raise click.ClickException(f"グラフ生成中にエラーが発生しました: {str(e)}")
+        raise click.ClickException(f"予期しないエラーが発生しました: {str(e)}")
     finally:
         # リソースのクリーンアップ
         db_manager.close()
