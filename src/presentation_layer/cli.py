@@ -66,7 +66,9 @@ def create_components(config: Dict[str, Any]) -> tuple[TimezoneHandler, GitHubCl
         
         github_client = GitHubClient(
             token=config['github']['api_token'],
-            base_url=config['github'].get('api_base_url', 'https://api.github.com')
+            per_page=config['github'].get('per_page', 100),
+            timeout=config['github'].get('timeout', 30),
+            rate_limit_buffer=config['github'].get('rate_limit_buffer', 100)
         )
         
         # データベース設定からSQLiteパスを構築
