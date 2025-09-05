@@ -49,17 +49,21 @@ class OptimizedQueries:
                 PullRequest.merged_at <= end_date
             ).order_by(PullRequest.merged_at)
             
-            # クエリプランの情報を取得（SQLite用）
-            explain_query = f"""
+            # クエリプランの情報を取得（SQLite用） - パラメータ化クエリでSQLインジェクション防止
+            explain_query = text("""
             EXPLAIN QUERY PLAN 
             SELECT * FROM pull_requests 
-            WHERE repo_name = '{repo_name}' 
-            AND merged_at >= '{start_date}' 
-            AND merged_at <= '{end_date}'
+            WHERE repo_name = :repo_name 
+            AND merged_at >= :start_date 
+            AND merged_at <= :end_date
             ORDER BY merged_at
-            """
+            """)
             
-            explain_result = self.session.execute(text(explain_query)).fetchall()
+            explain_result = self.session.execute(explain_query, {
+                'repo_name': repo_name,
+                'start_date': start_date,
+                'end_date': end_date
+            }).fetchall()
             
             # 実際のデータを取得
             results = query.all()
