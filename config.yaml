@@ -12,6 +12,10 @@ logging:
 github:
   api_base_url: https://api.github.com
   timeout: 30
+  # API token should be set via environment variable: GITHUB_TOKEN
+  api_token: ${GITHUB_TOKEN}
+  repositories:
+    - junichiro/gminor  # example repository - update with actual repositories
 
 application:
   name: gminor

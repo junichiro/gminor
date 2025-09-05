@@ -187,3 +187,65 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Database health check failed: {e}")
             return False
+    
+    def get_weekly_metrics(self) -> 'pandas.DataFrame':
+        """週次メトリクスデータを取得
+        
+        データベースからプルリクエストデータを取得し、
+        ProductivityVisualizerで使用可能な形式の週次メトリクスを計算して返します。
+        
+        Returns:
+            pandas.DataFrame: 週次メトリクスのDataFrame
+                必要な列: week_start, week_end, pr_count, unique_authors, productivity
+        
+        Raises:
+            DatabaseError: データ取得に失敗した場合
+        """
+        try:
+            import pandas as pd
+            from datetime import datetime, timezone, timedelta
+            from sqlalchemy import func, and_
+            from .models import PullRequest
+            
+            with self.get_session() as session:
+                # マージされたPRのみを対象にクエリを実行
+                query = session.query(
+                    PullRequest.merged_at,
+                    PullRequest.author,
+                    PullRequest.pr_number
+                ).filter(
+                    PullRequest.merged_at.isnot(None)
+                ).order_by(PullRequest.merged_at)
+                
+                results = query.all()
+                
+                if not results:
+                    # 空のDataFrameを返す
+                    return pd.DataFrame(columns=['week_start', 'week_end', 'pr_count', 'unique_authors', 'productivity'])
+                
+                # プルリクエストデータをリスト形式に変換
+                pr_data = []
+                for merged_at, author, pr_number in results:
+                    pr_data.append({
+                        'merged_at': merged_at,
+                        'author': author,
+                        'number': pr_number
+                    })
+                
+                # ProductivityAggregatorと同様の処理でweekly_dataを作成
+                from ..business_layer.aggregator import ProductivityAggregator
+                from ..business_layer.timezone_handler import TimezoneHandler
+                
+                # デフォルトのタイムゾーンハンドラーを使用
+                timezone_handler = TimezoneHandler()
+                aggregator = ProductivityAggregator(timezone_handler)
+                
+                weekly_metrics = aggregator.calculate_weekly_metrics(pr_data)
+                
+                logger.info(f"Retrieved {len(weekly_metrics)} weeks of metrics data")
+                return weekly_metrics
+                
+        except Exception as e:
+            error_msg = f"Failed to retrieve weekly metrics: {e}"
+            logger.error(error_msg)
+            raise DatabaseError(error_msg)
