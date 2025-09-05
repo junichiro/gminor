@@ -282,3 +282,94 @@ class DatabaseManager:
             error_msg = f"Failed to cleanup old data: {e}"
             logger.error(error_msg)
             raise DatabaseError(error_msg)
+    
+    def get_merged_pull_requests_paginated(self, page: int = 1, page_size: int = 100, 
+                                         repo_name: Optional[str] = None) -> Dict[str, Any]:
+        """
+        ページネーション付きでマージされたプルリクエストデータを取得
+        
+        Args:
+            page: ページ番号（1から開始）
+            page_size: 1ページあたりの件数
+            repo_name: フィルタ対象のリポジトリ名（Noneの場合は全リポジトリ）
+            
+        Returns:
+            Dict[str, Any]: ページネーション結果
+                - data: プルリクエストデータのリスト
+                - total_count: 総件数
+                - page: 現在のページ番号
+                - page_size: ページサイズ
+                - has_next_page: 次のページが存在するか
+                - has_prev_page: 前のページが存在するか
+                
+        Raises:
+            DatabaseError: データ取得に失敗した場合
+        """
+        try:
+            from .models import PullRequest
+            
+            logger.debug(f"Querying paginated pull requests: page={page}, page_size={page_size}, repo={repo_name}")
+            
+            with self.get_session() as session:
+                # ベースクエリ
+                base_query = session.query(
+                    PullRequest.merged_at,
+                    PullRequest.author,
+                    PullRequest.pr_number,
+                    PullRequest.repo_name,
+                    PullRequest.title
+                ).filter(
+                    PullRequest.merged_at.isnot(None)
+                )
+                
+                # リポジトリフィルタ
+                if repo_name:
+                    base_query = base_query.filter(PullRequest.repo_name == repo_name)
+                
+                # 総件数を取得
+                total_count = base_query.count()
+                
+                # ページネーション適用
+                offset = (page - 1) * page_size
+                data_query = base_query.order_by(PullRequest.merged_at.desc()).offset(offset).limit(page_size)
+                
+                logger.debug(f"Executing paginated query: offset={offset}, limit={page_size}")
+                results = data_query.all()
+                
+                # プルリクエストデータをリスト形式に変換
+                pr_data = []
+                for merged_at, author, pr_number, repo_name_result, title in results:
+                    pr_data.append({
+                        'merged_at': merged_at,
+                        'author': author,
+                        'number': pr_number,
+                        'repo_name': repo_name_result,
+                        'title': title
+                    })
+                
+                # ページネーション情報を計算
+                total_pages = (total_count + page_size - 1) // page_size
+                has_next_page = page < total_pages
+                has_prev_page = page > 1
+                
+                result = {
+                    'data': pr_data,
+                    'total_count': total_count,
+                    'page': page,
+                    'page_size': page_size,
+                    'total_pages': total_pages,
+                    'has_next_page': has_next_page,
+                    'has_prev_page': has_prev_page,
+                    'showing_from': offset + 1 if pr_data else 0,
+                    'showing_to': min(offset + page_size, total_count)
+                }
+                
+                logger.info(f"Retrieved paginated PRs: {len(pr_data)}/{total_count} "
+                           f"(page {page}/{total_pages})")
+                
+                return result
+                
+        except Exception as e:
+            error_msg = f"Failed to retrieve paginated pull requests: {e}"
+            logger.error(error_msg)
+            raise DatabaseError(error_msg)
