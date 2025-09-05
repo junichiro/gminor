@@ -89,7 +89,7 @@ class ProductivityVisualizer:
     
     def _prepare_chart_data(self, weekly_data: pd.DataFrame) -> tuple[List[str], List[float]]:
         """
-        チャート用のデータを準備
+        チャート用のデータを準備（pandasの機能を活用して効率化）
         
         Args:
             weekly_data: 週次データのDataFrame
@@ -97,13 +97,12 @@ class ProductivityVisualizer:
         Returns:
             Tuple[X軸データ（日付文字列のリスト）, Y軸データ（生産性のリスト）]
         """
-        # X軸データの準備（ローカルタイムゾーンに変換）
-        x_data = []
-        for week_start in weekly_data['week_start']:
-            local_date = self.timezone_handler.utc_to_local(week_start)
-            x_data.append(local_date.strftime('%Y-%m-%d'))
+        # X軸データの準備（pandasのapplyを使用してローカルタイムゾーンに変換）
+        x_data = weekly_data['week_start'].apply(
+            lambda dt: self.timezone_handler.utc_to_local(dt).strftime('%Y-%m-%d')
+        ).tolist()
         
-        # Y軸データ（生産性）
+        # Y軸データ（生産性）- そのまま使用
         y_data = weekly_data['productivity'].tolist()
         
         return x_data, y_data

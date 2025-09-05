@@ -3,7 +3,6 @@ import pytest
 import pandas as pd
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch
-import re
 
 from src.presentation_layer.visualizer import ProductivityVisualizer
 from src.business_layer.timezone_handler import TimezoneHandler
@@ -74,44 +73,52 @@ class TestProductivityVisualizer:
     
     def test_X軸に週の開始日が使用される(self, visualizer, sample_weekly_data):
         """正常系: X軸に週の開始日が使用されることを確認"""
-        with patch('plotly.graph_objects.Figure') as mock_figure_class:
-            mock_figure = Mock()
-            mock_figure.to_html.return_value = '<html><div>Mock Chart</div></html>'
-            mock_figure_class.return_value = mock_figure
-            
-            result = visualizer.create_productivity_chart(sample_weekly_data)
-            
-            # Figureが作成されたことを確認
-            assert mock_figure_class.called
-            
-            # add_traceが呼ばれたことを確認
-            assert mock_figure.add_trace.called
-            
-            # 呼び出し引数を確認
-            args, kwargs = mock_figure.add_trace.call_args
-            trace = args[0] if args else kwargs.get('trace')
-            
-            # トレースのX軸データに日付が含まれることを確認（大まかな確認）
-            assert hasattr(trace, 'x') or 'x' in str(trace)
+        with patch('plotly.graph_objects.Scatter') as mock_scatter:
+            mock_trace = Mock()
+            mock_scatter.return_value = mock_trace
+            with patch('plotly.graph_objects.Figure') as mock_figure_class:
+                mock_figure = Mock()
+                mock_figure.to_html.return_value = '<html><div>Mock Chart</div></html>'
+                mock_figure_class.return_value = mock_figure
+                
+                result = visualizer.create_productivity_chart(sample_weekly_data)
+                
+                # Scatterトレースが作成されたことを確認
+                assert mock_scatter.called
+                
+                # Scatterに渡された引数を確認
+                args, kwargs = mock_scatter.call_args
+                
+                # X軸データが日付形式であることを確認
+                assert 'x' in kwargs
+                x_data = kwargs['x']
+                assert len(x_data) == len(sample_weekly_data)
+                # 日付形式の文字列であることを確認
+                assert all(isinstance(date, str) and '-' in date for date in x_data)
     
     def test_Y軸に生産性が使用される(self, visualizer, sample_weekly_data):
         """正常系: Y軸に生産性が使用されることを確認"""
-        with patch('plotly.graph_objects.Figure') as mock_figure_class:
-            mock_figure = Mock()
-            mock_figure.to_html.return_value = '<html><div>Mock Chart</div></html>'
-            mock_figure_class.return_value = mock_figure
-            
-            result = visualizer.create_productivity_chart(sample_weekly_data)
-            
-            # add_traceが呼ばれたことを確認
-            assert mock_figure.add_trace.called
-            
-            # 呼び出し引数を確認
-            args, kwargs = mock_figure.add_trace.call_args
-            trace = args[0] if args else kwargs.get('trace')
-            
-            # トレースのY軸データに生産性データが含まれることを確認
-            assert hasattr(trace, 'y') or 'y' in str(trace)
+        with patch('plotly.graph_objects.Scatter') as mock_scatter:
+            mock_trace = Mock()
+            mock_scatter.return_value = mock_trace
+            with patch('plotly.graph_objects.Figure') as mock_figure_class:
+                mock_figure = Mock()
+                mock_figure.to_html.return_value = '<html><div>Mock Chart</div></html>'
+                mock_figure_class.return_value = mock_figure
+                
+                result = visualizer.create_productivity_chart(sample_weekly_data)
+                
+                # Scatterトレースが作成されたことを確認
+                assert mock_scatter.called
+                
+                # Scatterに渡された引数を確認
+                args, kwargs = mock_scatter.call_args
+                
+                # Y軸データが生産性データと一致することを確認
+                assert 'y' in kwargs
+                y_data = kwargs['y']
+                expected_y_data = sample_weekly_data['productivity'].tolist()
+                assert y_data == expected_y_data
     
     def test_青色の線グラフが作成される(self, visualizer, sample_weekly_data):
         """正常系: 青色のマーカー付き線グラフが作成されることを確認"""
@@ -223,8 +230,10 @@ class TestProductivityVisualizer:
     def test_不正なデータ型の処理(self, visualizer):
         """異常系: 不正なデータ型が渡された場合の処理を確認"""
         # 不正なデータ（文字列）を渡す
-        with pytest.raises((TypeError, AttributeError, ValueError)):
+        with pytest.raises(TypeError) as exc_info:
             visualizer.create_productivity_chart("invalid_data")
+        
+        assert "must be a pandas DataFrame" in str(exc_info.value)
     
     def test_必要な列が欠けているDataFrameの処理(self, visualizer):
         """異常系: 必要な列が欠けているDataFrameの処理を確認"""
@@ -234,5 +243,8 @@ class TestProductivityVisualizer:
             'invalid_column': [1]
         })
         
-        with pytest.raises((KeyError, AttributeError)):
+        with pytest.raises(KeyError) as exc_info:
             visualizer.create_productivity_chart(invalid_data)
+        
+        # 具体的なエラーメッセージを確認
+        assert "Missing required columns" in str(exc_info.value)
