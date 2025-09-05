@@ -256,17 +256,21 @@ class ProductivityVisualizer:
             'max_productivity_week': max_week_str,
             'min_productivity_week': min_week_str,
             'total_prs': int(weekly_data['pr_count'].sum()),
+            # NOTE: 現在の実装では週ごとのユニーク作者数の最大値を使用しています。
+            # 正確な総貢献者数（期間全体のユニーク作者数）を計算するには、
+            # 生のPRデータからユニーク作者を数える必要があります（要データ層修正）
             'total_contributors': int(weekly_data['unique_authors'].max()),
             'target_repositories': target_repositories
         }
     
-    def generate_html_report(self, weekly_data: pd.DataFrame, target_repositories: List[str]) -> str:
+    def generate_html_report(self, weekly_data: pd.DataFrame, target_repositories: List[str], moving_average_window: int = 4) -> str:
         """
         メタデータと統計サマリーを含む完全なHTMLレポートを生成する
         
         Args:
             weekly_data: 週次データのDataFrame
             target_repositories: 対象リポジトリのリスト
+            moving_average_window: 移動平均のウィンドウサイズ（デフォルト: 4）
             
         Returns:
             完全なHTMLレポートの文字列
@@ -275,7 +279,7 @@ class ProductivityVisualizer:
         stats = self.calculate_statistics(weekly_data, target_repositories)
         
         # グラフのHTMLを生成
-        chart_html = self.create_productivity_chart(weekly_data)
+        chart_html = self.create_productivity_chart(weekly_data, moving_average_window)
         
         # メタデータセクションを生成
         metadata_html = self._generate_metadata_html(weekly_data, target_repositories)
@@ -297,9 +301,11 @@ class ProductivityVisualizer:
         Returns:
             メタデータセクションのHTML文字列
         """
-        # 現在時刻を取得
-        now = datetime.datetime.now()
-        generation_time = f"{now.strftime('%Y-%m-%d %H:%M')} JST"
+        # 現在時刻を設定されたタイムゾーンで取得
+        now = datetime.datetime.now(self.timezone_handler._display_tz)
+        # タイムゾーン名を動的に取得（例：JST, PST, etc.）
+        tz_name = now.strftime('%Z') or self.timezone_handler.display_timezone.split('/')[-1]
+        generation_time = f"{now.strftime('%Y-%m-%d %H:%M')} {tz_name}"
         
         # 対象期間を計算
         if not weekly_data.empty:

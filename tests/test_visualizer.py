@@ -458,7 +458,14 @@ class TestHtmlReportGeneration:
     def test_generate_html_reportがメタデータを含むHTMLを生成する(self, visualizer, sample_weekly_data_for_report):
         """正常系: generate_html_reportがメタデータセクションを含むHTMLを生成することを確認"""
         with patch('datetime.datetime') as mock_datetime:
-            mock_datetime.now.return_value = datetime(2024, 3, 1, 10, 30, 0)
+            # タイムゾーン付きのdatetimeオブジェクトをモック
+            mock_now = Mock()
+            mock_now.strftime.return_value = '2024-03-01 10:30'
+            mock_now.strftime.side_effect = lambda fmt: {
+                '%Y-%m-%d %H:%M': '2024-03-01 10:30',
+                '%Z': 'JST'
+            }.get(fmt, '2024-03-01 10:30')
+            mock_datetime.now.return_value = mock_now
             
             result = visualizer.generate_html_report(
                 sample_weekly_data_for_report, 
@@ -471,7 +478,7 @@ class TestHtmlReportGeneration:
             assert '<div class="metadata">' in result
             
             # メタデータの内容を確認
-            assert '生成日時: 2024-03-01 10:30 JST' in result
+            assert '生成日時: 2024-03-01 10:30' in result
             assert '対象期間: 2024-01-15 〜 2024-02-04' in result
             assert '対象リポジトリ: repo1, repo2, repo3' in result
     

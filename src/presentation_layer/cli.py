@@ -284,7 +284,7 @@ def visualize(ctx):
         repositories = config['github'].get('repositories', [])
         
         # HTMLレポート生成（メタデータと統計サマリー付き）
-        html_content = visualizer.generate_html_report(weekly_data, repositories)
+        html_content = visualizer.generate_html_report(weekly_data, repositories, moving_average_window)
         
         # 出力ディレクトリとファイルパスの準備
         output_config = config.get('application', {}).get('output', {})
