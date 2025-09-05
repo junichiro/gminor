@@ -4,11 +4,11 @@
 # GitHub 設定
 github:
   # リポジトリリスト（owner/repo 形式）
-  # 例: ["organization/repo1", "organization/repo2"]
   repositories:
-    - "your-org/repo1"
-    - "your-org/repo2"
-    - "your-org/repo3"
+    - "junichiro/gminor"  # 例: このリポジトリ自体
+    # - "organization/backend-api"     # 例: 組織のバックエンドAPI
+    # - "organization/frontend-app"    # 例: 組織のフロントエンドアプリ
+    # - "username/personal-project"    # 例: 個人プロジェクト
   
   # データ取得設定
   fetch:
@@ -16,6 +16,9 @@ github:
     batch_size: 100        # API 一度の取得数
     rate_limit_buffer: 100 # レート制限バッファ（残り何回で待機）
     timeout: 30            # API リクエストタイムアウト（秒）
+  
+  # GitHub API 設定
+  api_base_url: https://api.github.com
 
 # タイムゾーン設定
 timezone:

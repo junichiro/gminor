@@ -144,36 +144,6 @@ python main.py config
 python main.py cleanup --before 2024-01-01
 ```
 
-## プロジェクト構造
-
-```
-gminor/
-├── src/                          # ソースコード
-│   ├── data_layer/              # データ層 - GitHub API、データベース操作
-│   │   ├── github_client.py     # GitHub APIクライアント
-│   │   ├── models.py            # SQLAlchemyモデル定義
-│   │   └── database.py          # DB接続・セッション管理
-│   │
-│   ├── business_layer/          # ビジネス層 - メトリクス計算、データ同期
-│   │   ├── aggregator.py        # メトリクス計算ロジック
-│   │   ├── sync_manager.py      # データ同期・差分取得
-│   │   ├── timezone_handler.py  # タイムゾーン変換処理
-│   │   └── config_loader.py     # 設定ファイル読み込み
-│   │
-│   └── presentation_layer/      # プレゼンテーション層 - CLI、可視化
-│       ├── visualizer.py        # グラフ生成
-│       └── cli.py              # CLIコマンド定義
-│
-├── tests/                       # テストコード
-├── logs/                        # ログファイル（gitignore済み）
-├── data/                        # データファイル（gitignore済み）
-├── output/                      # 出力ファイル（gitignore済み）
-├── config.yaml                  # 設定ファイル
-├── requirements.txt             # 依存関係
-├── .env.example                # 環境変数設定例
-└── main.py                     # エントリーポイント
-```
-
 ## データベース設計
 
 ### Pull Requests テーブル
@@ -219,6 +189,125 @@ gminor/
   - ズーム・パン機能
   - ホバー情報（日付、PR数、貢献者数）
 - **メタデータ**: 生成日時、対象期間、対象リポジトリ
+
+## プロジェクト構造
+
+```
+gminor/
+├── src/                          # ソースコード
+│   ├── data_layer/              # データ層 - GitHub API、データベース操作
+│   │   ├── github_client.py     # GitHub APIクライアント
+│   │   ├── models.py            # SQLAlchemyモデル定義
+│   │   └── database.py          # DB接続・セッション管理
+│   │
+│   ├── business_layer/          # ビジネス層 - メトリクス計算、データ同期
+│   │   ├── aggregator.py        # メトリクス計算ロジック
+│   │   ├── sync_manager.py      # データ同期・差分取得
+│   │   ├── timezone_handler.py  # タイムゾーン変換処理
+│   │   └── config_loader.py     # 設定ファイル読み込み
+│   │
+│   └── presentation_layer/      # プレゼンテーション層 - CLI、可視化
+│       ├── visualizer.py        # グラフ生成
+│       └── cli.py              # CLIコマンド定義
+│
+├── tests/                       # テストコード
+├── logs/                        # ログファイル（gitignore済み）
+├── data/                        # データファイル（gitignore済み）
+├── output/                      # 出力ファイル（gitignore済み）
+├── config.yaml                  # 設定ファイル
+├── requirements.txt             # 依存関係
+├── .env.example                # 環境変数設定例
+└── main.py                     # エントリーポイント
+```
+
+## セットアップ
+### 1. 前提条件
+- Python 3.10以上
+- GitHub Personal Access Token（Classic）
+- SQLite（自動作成）
+
+### 2. インストール
+
+```bash
+# リポジトリのクローン
+git clone https://github.com/junichiro/gminor.git
+cd gminor
+```
+
+```bash
+# 依存関係のインストール
+pip install -r requirements.txt
+```
+
+```bash
+# 設定ファイルの準備
+cp config.yaml.example config.yaml
+cp .env.example .env
+```
+
+### 3. GitHub Personal Access Tokenの設定
+
+`.env`ファイルを編集してGitHub tokenを設定：
+
+```env
+GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+```
+
+**必要な権限**: `repo` スコープ（プライベートリポジトリの場合）、`public_repo`（パブリックリポジトリの場合）
+
+### 4. 設定ファイルの編集
+
+`config.yaml`を編集して分析対象リポジトリを設定：
+
+```yaml
+github:
+  repositories:
+    - "your-org/repo1"
+    - "your-org/repo2"
+```## 使用方法
+
+### 初回データ取得
+
+```bash
+# デフォルト180日分を取得
+python main.py init
+
+# 期間を指定して取得
+python main.py init --days 365
+```
+
+### 差分更新
+
+```bash
+# 最終更新以降のデータを取得
+python main.py update
+```
+
+### 可視化
+
+```bash
+# データ取得せずに可視化のみ実行
+python main.py visualize
+
+# タイムゾーンを指定して可視化
+python main.py visualize --timezone "America/New_York"
+```
+
+### その他のコマンド
+
+```bash
+# 特定期間のデータを再取得
+python main.py fetch --from 2024-01-01 --to 2024-12-31
+
+# 統計情報表示
+python main.py stats
+
+# 設定確認
+python main.py config
+
+# データベースクリーンアップ
+python main.py cleanup --before 2024-01-01
+```
 
 ## 開発方針
 

@@ -7,7 +7,7 @@ import logging
 import os
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator, Optional
+from typing import Generator, Optional, List, Dict, Any
 
 from sqlalchemy import create_engine, Engine
 from sqlalchemy.orm import sessionmaker, Session, scoped_session
@@ -187,3 +187,48 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Database health check failed: {e}")
             return False
+    
+    def get_merged_pull_requests(self) -> List[Dict[str, Any]]:
+        """マージされたプルリクエストデータを取得
+        
+        データベースからマージされたプルリクエストの基本情報を取得します。
+        ビジネス層で使用するためのデータのみを提供します。
+        
+        Returns:
+            List[Dict[str, Any]]: プルリクエストデータのリスト
+                各要素は {'merged_at': datetime, 'author': str, 'number': int} 形式
+        
+        Raises:
+            DatabaseError: データ取得に失敗した場合
+        """
+        try:
+            from .models import PullRequest
+            
+            with self.get_session() as session:
+                # マージされたPRのみを対象にクエリを実行
+                query = session.query(
+                    PullRequest.merged_at,
+                    PullRequest.author,
+                    PullRequest.pr_number
+                ).filter(
+                    PullRequest.merged_at.isnot(None)
+                ).order_by(PullRequest.merged_at)
+                
+                results = query.all()
+                
+                # プルリクエストデータをリスト形式に変換
+                pr_data = []
+                for merged_at, author, pr_number in results:
+                    pr_data.append({
+                        'merged_at': merged_at,
+                        'author': author,
+                        'number': pr_number
+                    })
+                
+                logger.info(f"Retrieved {len(pr_data)} merged pull requests")
+                return pr_data
+                
+        except Exception as e:
+            error_msg = f"Failed to retrieve merged pull requests: {e}"
+            logger.error(error_msg)
+            raise DatabaseError(error_msg)
