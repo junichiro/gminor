@@ -73,6 +73,7 @@ def test_必要なヘルパー関数が定義されている():
     expected_functions = [
         'load_config_and_validate',
         'create_components',
+        'create_services_from_components',
         '_display_sync_result',
         'cli',
         'init',
