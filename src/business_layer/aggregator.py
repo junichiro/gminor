@@ -101,3 +101,25 @@ class ProductivityAggregator:
     def _calculate_productivity(self, pr_count: int, unique_authors: int) -> float:
         """生産性を計算（ゼロ除算を避ける）"""
         return pr_count / unique_authors if unique_authors > 0 else 0.0
+    
+    def calculate_moving_average(self, df: pd.DataFrame, window: int = 4) -> pd.Series:
+        """
+        生産性データの移動平均を計算
+        
+        Args:
+            df: 週次メトリクスを含むDataFrame（productivityカラムが必要）
+            window: 移動平均のウィンドウサイズ（デフォルト: 4週）
+            
+        Returns:
+            移動平均を含むpd.Series
+            
+        Raises:
+            KeyError: productivityカラムが存在しない場合
+        """
+        if df.empty:
+            return pd.Series(dtype=float)
+        
+        if 'productivity' not in df.columns:
+            raise KeyError("DataFrameには'productivity'カラムが含まれていません")
+        
+        return df['productivity'].rolling(window=window, min_periods=window).mean()

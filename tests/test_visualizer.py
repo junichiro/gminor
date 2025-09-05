@@ -1,6 +1,7 @@
 """ProductivityVisualizerのテスト"""
 import pytest
 import pandas as pd
+import numpy as np
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
@@ -248,3 +249,104 @@ class TestProductivityVisualizer:
         
         # 具体的なエラーメッセージを確認
         assert "Missing required columns" in str(exc_info.value)
+
+
+class TestMovingAverageVisualization:
+    """移動平均表示機能のテスト"""
+    
+    @pytest.fixture
+    def timezone_handler(self):
+        """TimezoneHandlerのフィクスチャ"""
+        return TimezoneHandler("Asia/Tokyo")
+    
+    @pytest.fixture
+    def visualizer(self, timezone_handler):
+        """ProductivityVisualizerのフィクスチャ"""
+        return ProductivityVisualizer(timezone_handler)
+    
+    @pytest.fixture
+    def sample_data_with_moving_average(self):
+        """移動平均付きのサンプルデータ"""
+        return pd.DataFrame({
+            'week_start': pd.date_range('2024-01-01', periods=6, freq='W'),
+            'week_end': pd.date_range('2024-01-07', periods=6, freq='W'),
+            'pr_count': [10, 15, 12, 18, 20, 14],
+            'unique_authors': [5, 6, 4, 8, 10, 7],
+            'productivity': [2.0, 2.5, 3.0, 2.25, 2.0, 2.0],
+            'moving_average': [np.nan, np.nan, np.nan, 2.4375, 2.1875, 2.1875]
+        })
+    
+    def test_移動平均付きのグラフが生成される(self, visualizer, sample_data_with_moving_average):
+        """正常系: 移動平均付きのグラフが生成されることを確認"""
+        result = visualizer.create_productivity_chart(sample_data_with_moving_average)
+        
+        # HTML文字列が返されることを確認
+        assert isinstance(result, str)
+        assert len(result) > 0
+        
+        # 基本的なHTML構造があることを確認
+        assert '<html>' in result.lower()
+        assert '<div' in result.lower()
+        assert 'plotly' in result.lower()
+    
+    def test_移動平均線が赤色の破線で表示される(self, visualizer, sample_data_with_moving_average):
+        """正常系: 移動平均が赤色の破線で表示されることを確認"""
+        with patch('plotly.graph_objects.Scatter') as mock_scatter:
+            mock_scatter.return_value = Mock()
+            with patch('plotly.graph_objects.Figure') as mock_figure_class:
+                mock_figure = Mock()
+                mock_figure.to_html.return_value = '<html><div>Mock Chart</div></html>'
+                mock_figure_class.return_value = mock_figure
+                
+                result = visualizer.create_productivity_chart(sample_data_with_moving_average)
+                
+                # Scatterが2回呼ばれることを確認（生産性と移動平均）
+                assert mock_scatter.call_count == 2
+                
+                # 2回目の呼び出し（移動平均）の引数を確認
+                second_call_args, second_call_kwargs = mock_scatter.call_args_list[1]
+                
+                # 移動平均の名前が設定されることを確認
+                assert 'name' in second_call_kwargs
+                assert '移動平均' in second_call_kwargs['name']
+                
+                # 赤色の破線が設定されることを確認
+                assert 'line' in second_call_kwargs
+                line_config = second_call_kwargs['line']
+                assert 'color' in line_config
+                assert line_config['color'] == 'red'
+                assert 'dash' in line_config
+                assert line_config['dash'] == 'dash'
+    
+    def test_移動平均なしデータでも正常動作する(self, visualizer):
+        """正常系: 移動平均カラムがないデータでも正常動作することを確認"""
+        data_without_ma = pd.DataFrame({
+            'week_start': pd.date_range('2024-01-01', periods=3, freq='W'),
+            'week_end': pd.date_range('2024-01-07', periods=3, freq='W'),
+            'pr_count': [10, 15, 12],
+            'unique_authors': [5, 6, 4],
+            'productivity': [2.0, 2.5, 3.0]
+        })
+        
+        result = visualizer.create_productivity_chart(data_without_ma)
+        
+        # HTML文字列が返されることを確認
+        assert isinstance(result, str)
+        assert len(result) > 0
+    
+    def test_凡例が適切に設定される(self, visualizer, sample_data_with_moving_average):
+        """正常系: 凡例が適切に設定されることを確認"""  
+        with patch('plotly.graph_objects.Figure') as mock_figure_class:
+            mock_figure = Mock()
+            mock_figure.to_html.return_value = '<html><div>Mock Chart</div></html>'
+            mock_figure_class.return_value = mock_figure
+            
+            result = visualizer.create_productivity_chart(sample_data_with_moving_average)
+            
+            # update_layoutが呼ばれることを確認
+            assert mock_figure.update_layout.called
+            
+            # レイアウト設定に凡例の設定が含まれることを確認
+            args, kwargs = mock_figure.update_layout.call_args
+            assert 'showlegend' in kwargs
+            assert kwargs['showlegend'] is True

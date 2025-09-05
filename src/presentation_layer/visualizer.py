@@ -16,7 +16,9 @@ class ProductivityVisualizer:
         'line_color': 'blue',
         'line_width': 2,
         'marker_size': 6,
-        'template': 'plotly_white'
+        'template': 'plotly_white',
+        'moving_average_color': 'red',
+        'moving_average_dash': 'dash'
     }
     
     def __init__(self, timezone_handler: TimezoneHandler):
@@ -28,13 +30,14 @@ class ProductivityVisualizer:
         """
         self.timezone_handler = timezone_handler
     
-    def create_productivity_chart(self, weekly_data: pd.DataFrame) -> str:
+    def create_productivity_chart(self, weekly_data: pd.DataFrame, moving_average_window: int = 4) -> str:
         """
         週次生産性グラフを生成してHTMLを返す
         
         Args:
             weekly_data: 週次データのDataFrame（ProductivityAggregatorの出力）
                 必要な列: week_start, week_end, pr_count, unique_authors, productivity
+            moving_average_window: 移動平均のウィンドウサイズ（デフォルト: 4週）
         
         Returns:
             Plotlyで生成されたHTMLファイルの文字列
@@ -51,10 +54,10 @@ class ProductivityVisualizer:
             return self._create_empty_chart()
         
         # データの前処理
-        x_data, y_data = self._prepare_chart_data(weekly_data)
+        x_data, y_data, ma_data = self._prepare_chart_data(weekly_data)
         
         # グラフの作成
-        fig = self._create_figure(x_data, y_data)
+        fig = self._create_figure(x_data, y_data, ma_data, moving_average_window)
         
         # レイアウトの適用
         self._apply_layout(fig)
@@ -87,7 +90,7 @@ class ProductivityVisualizer:
         if missing_columns:
             raise KeyError(f"Missing required columns: {missing_columns}")
     
-    def _prepare_chart_data(self, weekly_data: pd.DataFrame) -> tuple[List[str], List[float]]:
+    def _prepare_chart_data(self, weekly_data: pd.DataFrame) -> tuple[List[str], List[float], List[float]]:
         """
         チャート用のデータを準備（pandasの機能を活用して効率化）
         
@@ -95,7 +98,7 @@ class ProductivityVisualizer:
             weekly_data: 週次データのDataFrame
             
         Returns:
-            Tuple[X軸データ（日付文字列のリスト）, Y軸データ（生産性のリスト）]
+            Tuple[X軸データ（日付文字列のリスト）, Y軸データ（生産性のリスト）, 移動平均データ（移動平均のリスト）]
         """
         # X軸データの準備（pandasのapplyを使用してローカルタイムゾーンに変換）
         x_data = weekly_data['week_start'].apply(
@@ -105,15 +108,19 @@ class ProductivityVisualizer:
         # Y軸データ（生産性）- そのまま使用
         y_data = weekly_data['productivity'].tolist()
         
-        return x_data, y_data
+        # 移動平均データ（存在する場合）
+        ma_data = weekly_data['moving_average'].tolist() if 'moving_average' in weekly_data.columns else []
+        
+        return x_data, y_data, ma_data
     
-    def _create_figure(self, x_data: List[str], y_data: List[float]) -> go.Figure:
+    def _create_figure(self, x_data: List[str], y_data: List[float], ma_data: List[float] = None, moving_average_window: int = 4) -> go.Figure:
         """
         Plotly図表オブジェクトを作成
         
         Args:
             x_data: X軸データ
             y_data: Y軸データ
+            ma_data: 移動平均データ（オプション）
             
         Returns:
             Plotly図表オブジェクト
@@ -136,6 +143,20 @@ class ProductivityVisualizer:
             )
         ))
         
+        # 移動平均線を追加（データが存在する場合）
+        if ma_data:
+            fig.add_trace(go.Scatter(
+                x=x_data,
+                y=ma_data,
+                mode='lines',
+                name=f'{moving_average_window}週移動平均',
+                line=dict(
+                    color=self.CHART_CONFIG['moving_average_color'],
+                    width=self.CHART_CONFIG['line_width'],
+                    dash=self.CHART_CONFIG['moving_average_dash']
+                )
+            ))
+        
         return fig
     
     def _apply_layout(self, fig: go.Figure) -> None:
@@ -150,7 +171,8 @@ class ProductivityVisualizer:
             xaxis_title='週の開始日',
             yaxis_title='生産性 (PR数/人)',
             hovermode='x unified',
-            template=self.CHART_CONFIG['template']
+            template=self.CHART_CONFIG['template'],
+            showlegend=True
         )
     
     def _create_empty_chart(self) -> str:
@@ -161,7 +183,7 @@ class ProductivityVisualizer:
             空のチャートのHTML文字列
         """
         # 空のデータでグラフを作成
-        fig = self._create_figure([], [])
+        fig = self._create_figure([], [], [], 4)
         
         # 基本レイアウトを適用
         self._apply_layout(fig)

@@ -1,6 +1,7 @@
 """ProductivityAggregatorのテスト"""
 import pytest
 import pandas as pd
+import numpy as np
 from datetime import datetime, timezone
 from unittest.mock import Mock
 
@@ -299,3 +300,120 @@ class TestProductivityAggregator:
         # タイムゾーンを考慮して適切に週が分けられることを確認
         assert isinstance(result, pd.DataFrame)
         assert len(result) >= 1
+
+
+class TestMovingAverageCalculation:
+    """4週移動平均計算のテスト"""
+    
+    @pytest.fixture
+    def timezone_handler(self):
+        """TimezoneHandlerのフィクスチャ"""
+        return TimezoneHandler("Asia/Tokyo")
+    
+    @pytest.fixture
+    def aggregator(self, timezone_handler):
+        """ProductivityAggregatorのフィクスチャ"""
+        return ProductivityAggregator(timezone_handler)
+    
+    @pytest.fixture
+    def sample_weekly_data(self):
+        """テスト用の週次データ"""
+        return pd.DataFrame({
+            'week_start': pd.date_range('2024-01-01', periods=8, freq='W'),
+            'week_end': pd.date_range('2024-01-07', periods=8, freq='W'),
+            'pr_count': [10, 15, 12, 18, 20, 14, 16, 22],
+            'unique_authors': [5, 6, 4, 8, 10, 7, 8, 11],
+            'productivity': [2.0, 2.5, 3.0, 2.25, 2.0, 2.0, 2.0, 2.0]
+        })
+    
+    def test_calculate_moving_average_メソッドが定義されている(self, aggregator):
+        """正常系: calculate_moving_averageメソッドが定義されていることを確認"""
+        assert hasattr(aggregator, 'calculate_moving_average')
+        assert callable(getattr(aggregator, 'calculate_moving_average'))
+    
+    def test_4週移動平均が正しく計算される(self, aggregator, sample_weekly_data):
+        """正常系: 4週移動平均が正しく計算されることを確認"""
+        # 4週移動平均を計算
+        result = aggregator.calculate_moving_average(sample_weekly_data)
+        
+        # 結果がpd.Seriesであることを確認
+        assert isinstance(result, pd.Series)
+        
+        # 移動平均の長さが元データと同じであることを確認
+        assert len(result) == len(sample_weekly_data)
+        
+        # 最初の3つの値はNaNであることを確認（4週分のデータが不足）
+        assert pd.isna(result.iloc[0])
+        assert pd.isna(result.iloc[1])
+        assert pd.isna(result.iloc[2])
+        
+        # 4番目以降は計算値があることを確認
+        assert not pd.isna(result.iloc[3])
+        
+        # 4番目の値が手計算と一致することを確認 (2.0+2.5+3.0+2.25)/4 = 2.4375
+        assert abs(result.iloc[3] - 2.4375) < 0.0001
+    
+    def test_移動平均のウィンドウサイズを変更できる(self, aggregator, sample_weekly_data):
+        """正常系: 移動平均のウィンドウサイズを変更できることを確認"""
+        # 3週移動平均を計算
+        result = aggregator.calculate_moving_average(sample_weekly_data, window=3)
+        
+        assert isinstance(result, pd.Series)
+        assert len(result) == len(sample_weekly_data)
+        
+        # 最初の2つの値はNaNであることを確認（3週分のデータが不足）
+        assert pd.isna(result.iloc[0])
+        assert pd.isna(result.iloc[1])
+        
+        # 3番目以降は計算値があることを確認
+        assert not pd.isna(result.iloc[2])
+        
+        # 3番目の値が手計算と一致することを確認 (2.0+2.5+3.0)/3 = 2.5
+        assert abs(result.iloc[2] - 2.5) < 0.0001
+    
+    def test_データ不足時の処理(self, aggregator):
+        """異常系: データ点が移動平均ウィンドウより少ない場合の処理を確認"""
+        # 3週分のデータしかない場合
+        short_data = pd.DataFrame({
+            'week_start': pd.date_range('2024-01-01', periods=3, freq='W'),
+            'week_end': pd.date_range('2024-01-07', periods=3, freq='W'), 
+            'pr_count': [10, 15, 12],
+            'unique_authors': [5, 6, 4],
+            'productivity': [2.0, 2.5, 3.0]
+        })
+        
+        result = aggregator.calculate_moving_average(short_data, window=4)
+        
+        # 結果がpd.Seriesであることを確認
+        assert isinstance(result, pd.Series)
+        assert len(result) == 3
+        
+        # 全ての値がNaNであることを確認
+        assert pd.isna(result).all()
+    
+    def test_空のデータの処理(self, aggregator):
+        """異常系: 空のDataFrameの処理を確認"""
+        empty_data = pd.DataFrame(columns=['week_start', 'week_end', 'pr_count', 'unique_authors', 'productivity'])
+        
+        result = aggregator.calculate_moving_average(empty_data)
+        
+        # 空のSeriesが返されることを確認
+        assert isinstance(result, pd.Series)
+        assert len(result) == 0
+    
+    def test_不正なcolumnを含むデータの処理(self, aggregator):
+        """異常系: productivityカラムが存在しない場合のエラー処理"""
+        invalid_data = pd.DataFrame({
+            'week_start': pd.date_range('2024-01-01', periods=4, freq='W'),
+            'week_end': pd.date_range('2024-01-07', periods=4, freq='W'),
+            'pr_count': [10, 15, 12, 18],
+            'unique_authors': [5, 6, 4, 8]
+            # productivity カラムが存在しない
+        })
+        
+        with pytest.raises(KeyError) as exc_info:
+            aggregator.calculate_moving_average(invalid_data)
+        
+        # エラーメッセージが日本語であることを確認
+        assert "productivity" in str(exc_info.value)
+        assert "カラム" in str(exc_info.value)
