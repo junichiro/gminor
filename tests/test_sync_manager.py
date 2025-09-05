@@ -324,3 +324,238 @@ class TestSyncManager:
         assert result['status'] == 'success'
         assert result['processed_repositories'] == 0
         assert result['total_prs_fetched'] == 0
+
+
+class TestIncrementalSync:
+    """差分同期機能のテスト"""
+    
+    @pytest.fixture
+    def sync_manager(self, mock_github_client, mock_db_manager, mock_aggregator):
+        """SyncManagerのフィクスチャ"""
+        return SyncManager(
+            github_client=mock_github_client,
+            db_manager=mock_db_manager,
+            aggregator=mock_aggregator
+        )
+    
+    @pytest.fixture
+    def mock_github_client(self):
+        """GitHubClientのモック"""
+        return Mock(spec=GitHubClient)
+    
+    @pytest.fixture
+    def mock_db_manager(self):
+        """DatabaseManagerのモック"""
+        return Mock(spec=DatabaseManager)
+    
+    @pytest.fixture
+    def mock_aggregator(self):
+        """ProductivityAggregatorのモック"""
+        return Mock(spec=ProductivityAggregator)
+    
+    @pytest.fixture
+    def sample_sync_status(self):
+        """サンプル同期ステータス"""
+        status = Mock()
+        status.repo_name = "test/repo"
+        status.last_synced_at = datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc)
+        status.last_pr_number = 100
+        status.status = 'completed'
+        status.is_completed.return_value = True
+        return status
+    
+    @pytest.fixture
+    def sample_new_pr_data(self):
+        """差分同期用の新しいPRデータ"""
+        return [
+            {
+                "number": 101,
+                "title": "New PR 1",
+                "author": "developer1",
+                "merged_at": datetime(2024, 1, 20, 10, 0, tzinfo=timezone.utc),
+                "created_at": datetime(2024, 1, 18, 9, 0, tzinfo=timezone.utc),
+                "updated_at": datetime(2024, 1, 20, 10, 0, tzinfo=timezone.utc)
+            },
+            {
+                "number": 102,
+                "title": "New PR 2",
+                "author": "developer2",
+                "merged_at": datetime(2024, 1, 21, 11, 0, tzinfo=timezone.utc),
+                "created_at": datetime(2024, 1, 19, 9, 0, tzinfo=timezone.utc),
+                "updated_at": datetime(2024, 1, 21, 11, 0, tzinfo=timezone.utc)
+            }
+        ]
+    
+    def test_update_sync_メソッドが定義されている(self, sync_manager):
+        """正常系: update_syncメソッドが定義されていることを確認"""
+        assert hasattr(sync_manager, 'update_sync')
+        assert callable(getattr(sync_manager, 'update_sync'))
+    
+    def test_get_last_sync_date_メソッドが定義されている(self, sync_manager):
+        """正常系: get_last_sync_dateメソッドが定義されていることを確認"""
+        assert hasattr(sync_manager, 'get_last_sync_date')
+        assert callable(getattr(sync_manager, 'get_last_sync_date'))
+    
+    def test_update_sync_status_メソッドが定義されている(self, sync_manager):
+        """正常系: update_sync_statusメソッドが定義されていることを確認"""
+        assert hasattr(sync_manager, 'update_sync_status')
+        assert callable(getattr(sync_manager, 'update_sync_status'))
+    
+    def test_get_last_sync_date_が正しい日付を返す(self, sync_manager, mock_db_manager, sample_sync_status):
+        """正常系: get_last_sync_dateが最終同期日を正しく返すことを確認"""
+        repo_name = "test/repo"
+        
+        # データベースから同期ステータスを取得するモック
+        mock_session = Mock()
+        mock_db_manager.get_session.return_value.__enter__.return_value = mock_session
+        mock_session.query.return_value.filter_by.return_value.first.return_value = sample_sync_status
+        
+        result = sync_manager.get_last_sync_date(repo_name)
+        
+        assert result == sample_sync_status.last_synced_at
+        mock_session.query.assert_called_once()
+    
+    def test_get_last_sync_date_が初回同期時にNoneを返す(self, sync_manager, mock_db_manager):
+        """正常系: 初回同期時（同期履歴なし）にget_last_sync_dateがNoneを返すことを確認"""
+        repo_name = "test/new-repo"
+        
+        # 同期ステータスが存在しない場合
+        mock_session = Mock()
+        mock_db_manager.get_session.return_value.__enter__.return_value = mock_session
+        mock_session.query.return_value.filter_by.return_value.first.return_value = None
+        
+        result = sync_manager.get_last_sync_date(repo_name)
+        
+        assert result is None
+    
+    def test_update_sync_が差分データのみを取得する(self, sync_manager, mock_github_client, 
+                                            mock_db_manager, mock_aggregator,
+                                            sample_sync_status, sample_new_pr_data):
+        """正常系: update_syncが最終同期日以降の差分データのみを取得することを確認"""
+        repositories = ["test/repo"]
+        
+        # 既存の同期ステータスをモック
+        mock_session = Mock()
+        mock_db_manager.get_session.return_value.__enter__.return_value = mock_session
+        mock_session.query.return_value.filter_by.return_value.first.return_value = sample_sync_status
+        
+        # GitHubからの新しいPR取得をモック
+        mock_github_client.fetch_merged_prs.return_value = sample_new_pr_data
+        
+        # 集計処理をモック
+        mock_aggregator.calculate_weekly_metrics.return_value = pd.DataFrame()
+        
+        result = sync_manager.update_sync(repositories)
+        
+        # 最終同期日以降の日付でGitHubAPIが呼び出されたことを確認
+        args, kwargs = mock_github_client.fetch_merged_prs.call_args
+        since_date = args[1]  # since parameter
+        assert since_date == sample_sync_status.last_synced_at
+        
+        # 結果が正常に返されることを確認
+        assert result['status'] == 'success'
+    
+    def test_update_sync_が初回同期未実施時にエラーを返す(self, sync_manager, mock_db_manager):
+        """異常系: update_syncが初回同期未実施リポジトリでエラーを返すことを確認"""
+        repositories = ["test/unsynced-repo"]
+        
+        # 同期ステータスが存在しない場合
+        mock_session = Mock()
+        mock_db_manager.get_session.return_value.__enter__.return_value = mock_session
+        mock_session.query.return_value.filter_by.return_value.first.return_value = None
+        
+        result = sync_manager.update_sync(repositories)
+        
+        # 部分的な失敗として処理されることを確認
+        assert result['status'] in ['partial_success', 'error']
+        assert 'test/unsynced-repo' in result.get('failed_repositories', [])
+    
+    def test_update_sync_が空の差分データを適切に処理する(self, sync_manager, mock_github_client,
+                                               mock_db_manager, mock_aggregator,
+                                               sample_sync_status):
+        """正常系: update_syncが空の差分データ（新しいPRなし）を適切に処理することを確認"""
+        repositories = ["test/repo"]
+        
+        # 既存の同期ステータスをモック
+        mock_session = Mock()
+        mock_db_manager.get_session.return_value.__enter__.return_value = mock_session
+        mock_session.query.return_value.filter_by.return_value.first.return_value = sample_sync_status
+        
+        # GitHubから空の結果（新しいPRなし）
+        mock_github_client.fetch_merged_prs.return_value = []
+        
+        result = sync_manager.update_sync(repositories)
+        
+        # 成功として処理されることを確認
+        assert result['status'] == 'success'
+        assert result['total_prs_fetched'] == 0
+        
+        # 集計処理は呼び出されない（データがないため）
+        mock_aggregator.calculate_weekly_metrics.assert_not_called()
+    
+    def test_update_sync_status_が同期状態を正しく更新する(self, sync_manager, mock_db_manager,
+                                                  sample_sync_status):
+        """正常系: update_sync_statusが同期状態を正しく更新することを確認"""
+        repo_name = "test/repo"
+        sync_result = {
+            'pr_count': 2,
+            'last_pr_number': 102,
+            'success': True
+        }
+        
+        # 既存の同期ステータスをモック
+        mock_session = Mock()
+        mock_db_manager.get_session.return_value.__enter__.return_value = mock_session
+        mock_session.query.return_value.filter_by.return_value.first.return_value = sample_sync_status
+        
+        sync_manager.update_sync_status(repo_name, sync_result)
+        
+        # 同期ステータスの更新が呼び出されたことを確認
+        mock_session.commit.assert_called_once()
+        
+        # last_pr_numberが更新されることを確認
+        assert sample_sync_status.last_pr_number == 102
+    
+    def test_複数リポジトリの差分同期が正常に動作する(self, sync_manager, mock_github_client,
+                                          mock_db_manager, mock_aggregator,
+                                          sample_new_pr_data):
+        """正常系: 複数リポジトリの差分同期が正常に動作することを確認"""
+        repositories = ["test/repo1", "test/repo2", "test/repo3"]
+        
+        # 各リポジトリの同期ステータスをモック
+        mock_session = Mock()
+        mock_db_manager.get_session.return_value.__enter__.return_value = mock_session
+        
+        # 同期済みのリポジトリとして設定
+        mock_status = Mock()
+        mock_status.last_synced_at = datetime(2024, 1, 15, tzinfo=timezone.utc)
+        mock_status.is_completed.return_value = True
+        mock_session.query.return_value.filter_by.return_value.first.return_value = mock_status
+        
+        # GitHubからの差分データ取得をモック
+        mock_github_client.fetch_merged_prs.return_value = sample_new_pr_data
+        mock_aggregator.calculate_weekly_metrics.return_value = pd.DataFrame()
+        
+        result = sync_manager.update_sync(repositories)
+        
+        # 全リポジトリが処理されたことを確認
+        assert result['processed_repositories'] == 3
+        assert mock_github_client.fetch_merged_prs.call_count == 3
+
+
+class TestUpdateSyncCommand:
+    """updateコマンドのテスト"""
+    
+    def test_update_コマンドがCLIに追加されている(self):
+        """正常系: updateコマンドがCLIに追加されていることを確認"""
+        # CLIファイルをテキストとして読み取って確認
+        from pathlib import Path
+        
+        cli_path = Path(__file__).parent.parent / 'src' / 'presentation_layer' / 'cli.py'
+        with open(cli_path, 'r', encoding='utf-8') as f:
+            cli_content = f.read()
+        
+        # update関数とコマンドデコレータが存在することを確認
+        assert 'def update(ctx):' in cli_content
+        assert '@cli.command()' in cli_content
+        assert '差分データ同期を実行' in cli_content

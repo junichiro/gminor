@@ -208,6 +208,41 @@ def _display_sync_result(result: Dict[str, Any]) -> None:
 
 @cli.command()
 @click.pass_context
+def update(ctx):
+    """差分データ同期を実行"""
+    click.echo("🔄 差分データ同期を開始しています...")
+    
+    # コンテキストから依存関係を取得
+    config = ctx.obj['config']
+    timezone_handler, github_client, db_manager, aggregator = ctx.obj['components']
+    services = ctx.obj['services']
+    
+    # リポジトリ設定の確認
+    repositories = config['github'].get('repositories', [])
+    if not repositories:
+        raise click.ClickException(
+            "設定ファイルにリポジトリが定義されていません。\n"
+            "config.yaml の github.repositories に対象リポジトリを追加してください。"
+        )
+    
+    try:
+        # 注入されたSyncManagerを使用して差分同期実行
+        sync_manager = services['sync_manager']
+        result = sync_manager.update_sync(repositories)
+        
+        # 結果の表示
+        _display_sync_result(result)
+        
+    except Exception as e:
+        db_manager.close()
+        raise click.ClickException(f"差分同期処理中にエラーが発生しました: {str(e)}")
+    finally:
+        # リソースのクリーンアップ
+        db_manager.close()
+
+
+@cli.command()
+@click.pass_context
 def visualize(ctx):
     """可視化のみ実行"""
     click.echo("📊 グラフ生成を開始しています...")

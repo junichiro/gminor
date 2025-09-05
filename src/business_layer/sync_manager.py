@@ -294,3 +294,184 @@ class SyncManager:
                 sync_status.error_message = error_message
             
             session.commit()
+    
+    def update_sync(self, repositories: List[str]) -> Dict[str, Any]:
+        """
+        差分データ同期を実行
+        
+        Args:
+            repositories: 同期対象のリポジトリリスト
+            
+        Returns:
+            同期結果を含む辞書
+            
+        Raises:
+            DataSyncError: 同期処理でエラーが発生した場合
+        """
+        start_time = time.time()
+        
+        if not repositories:
+            return self._create_sync_result(0, 0, start_time, [])
+        
+        try:
+            total_prs_fetched, processed_repositories, failed_repositories = self._process_repositories_incremental(
+                repositories
+            )
+            
+            return self._create_sync_result(
+                processed_repositories, total_prs_fetched, start_time, failed_repositories
+            )
+        
+        except DatabaseError as e:
+            self.logger.error(f"Database error during incremental sync: {e}")
+            raise DataSyncError(f"Database error during incremental sync: {e}", e)
+        
+        except Exception as e:
+            self.logger.error(f"Unexpected error during incremental sync: {e}")
+            raise DataSyncError(f"Unexpected error during incremental sync: {e}", e)
+    
+    def get_last_sync_date(self, repo_name: str) -> Optional[datetime]:
+        """
+        リポジトリの最終同期日を取得
+        
+        Args:
+            repo_name: リポジトリ名
+            
+        Returns:
+            最終同期日（存在しない場合はNone）
+        """
+        with self.db_manager.get_session() as session:
+            sync_status = session.query(SyncStatus).filter_by(
+                repo_name=repo_name
+            ).first()
+            
+            if sync_status and sync_status.is_completed():
+                return sync_status.last_synced_at
+            return None
+    
+    def update_sync_status(self, repo_name: str, sync_result: Dict[str, Any]) -> None:
+        """
+        同期状態を更新
+        
+        Args:
+            repo_name: リポジトリ名
+            sync_result: 同期結果の辞書
+        """
+        with self.db_manager.get_session() as session:
+            sync_status = session.query(SyncStatus).filter_by(
+                repo_name=repo_name
+            ).first()
+            
+            if not sync_status:
+                sync_status = SyncStatus(repo_name=repo_name)
+                session.add(sync_status)
+            
+            if sync_result.get('success', True):
+                sync_status.status = 'completed'
+                sync_status.last_synced_at = datetime.now(timezone.utc)
+                if 'last_pr_number' in sync_result:
+                    sync_status.last_pr_number = sync_result['last_pr_number']
+            else:
+                sync_status.status = 'error'
+                sync_status.error_message = sync_result.get('error_message', 'Unknown error')
+            
+            session.commit()
+    
+    def _process_repositories_incremental(self, repositories: List[str]) -> Tuple[int, int, List[str]]:
+        """
+        差分同期用のリポジトリリスト処理
+        
+        各リポジトリに対して：
+        1. 最終同期日を確認
+        2. 差分データを取得
+        3. データベースに保存
+        4. 同期ステータスを更新
+        
+        Args:
+            repositories: 処理対象のリポジトリリスト
+            
+        Returns:
+            Tuple[取得したPR総数, 処理成功したリポジトリ数, 失敗したリポジトリリスト]
+        """
+        total_prs_fetched = 0
+        processed_repositories = 0
+        failed_repositories = []
+        
+        for repository in repositories:
+            try:
+                prs_count = self._process_single_repository_incremental(repository)
+                total_prs_fetched += prs_count
+                processed_repositories += 1
+                
+            except (GitHubAPIError, Exception) as e:
+                error_message = f"Error during incremental sync for {repository}: {e}"
+                self.logger.error(error_message)
+                failed_repositories.append(repository)
+                # エラーが発生しても他のリポジトリの処理は継続
+                continue
+        
+        return total_prs_fetched, processed_repositories, failed_repositories
+    
+    def _process_single_repository_incremental(self, repository: str) -> int:
+        """
+        単一リポジトリの差分同期を処理
+        
+        Args:
+            repository: リポジトリ名
+            
+        Returns:
+            取得したPR数
+            
+        Raises:
+            ValueError: 初回同期が未実施の場合
+            GitHubAPIError: GitHub API呼び出し時のエラー
+        """
+        # 最終同期日を取得
+        last_sync_date = self.get_last_sync_date(repository)
+        
+        if last_sync_date is None:
+            # 初回同期が未実施の場合はエラーとして扱う
+            error_message = f"Repository {repository} has not been initially synced"
+            self.logger.error(error_message)
+            raise ValueError(error_message)
+        
+        # 差分データを取得
+        pr_data = self.github_client.fetch_merged_prs(repo=repository, since=last_sync_date)
+        
+        if not pr_data:
+            # 新しいデータなしでも成功として扱う
+            self._update_sync_status_for_incremental(repository, [], success=True)
+            return 0
+        
+        # データベースに保存
+        saved_prs = self._save_pr_data(repository, pr_data)
+        
+        # 週次メトリクスを計算・保存
+        if saved_prs:
+            weekly_metrics = self.aggregator.calculate_weekly_metrics(pr_data)
+            self._save_weekly_metrics(repository, weekly_metrics)
+        
+        # 同期ステータスを更新
+        self._update_sync_status_for_incremental(repository, pr_data, success=True)
+        
+        return len(saved_prs)
+    
+    def _update_sync_status_for_incremental(self, repository: str, pr_data: List[Dict[str, Any]], 
+                                          success: bool = True) -> None:
+        """
+        差分同期用の同期ステータス更新
+        
+        Args:
+            repository: リポジトリ名
+            pr_data: PRデータのリスト
+            success: 同期が成功したかどうか
+        """
+        sync_result = {
+            'pr_count': len(pr_data),
+            'success': success
+        }
+        
+        if pr_data and success:
+            sync_result['last_pr_number'] = max(pr['number'] for pr in pr_data)
+        
+        self.update_sync_status(repository, sync_result)

@@ -72,6 +72,12 @@ python main.py init
 python main.py init --days 90
 ```
 
+#### 差分データ同期
+```bash
+# 最終同期日以降の差分データのみを取得（効率的）
+python main.py update
+```
+
 #### グラフ生成
 ```bash
 # 生産性グラフを生成（output/productivity_chart.html）
@@ -82,6 +88,7 @@ python main.py visualize
 ```bash
 python main.py --help
 python main.py init --help
+python main.py update --help
 python main.py visualize --help
 ```
 
