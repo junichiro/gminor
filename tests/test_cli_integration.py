@@ -77,6 +77,7 @@ def test_必要なヘルパー関数が定義されている():
         '_display_sync_result',
         'cli',
         'init',
+        'update',
         'visualize'
     ]
     
@@ -116,6 +117,10 @@ def test_CLIコマンドのClick装飾子が正しく設定されている():
     # init関数がclick.commandで装飾されていることを確認
     assert 'init' in decorated_functions
     assert any('command' in dec for dec in decorated_functions['init'])
+    
+    # update関数がclick.commandで装飾されていることを確認
+    assert 'update' in decorated_functions
+    assert any('command' in dec for dec in decorated_functions['update'])
     
     # visualize関数がclick.commandで装飾されていることを確認
     assert 'visualize' in decorated_functions
