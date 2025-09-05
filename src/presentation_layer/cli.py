@@ -280,8 +280,11 @@ def visualize(ctx):
         moving_average_window = 4  # デフォルトのウィンドウサイズ
         weekly_data['moving_average'] = aggregator.calculate_moving_average(weekly_data, window=moving_average_window)
         
-        # グラフ生成（ウィンドウサイズを渡す）
-        html_content = visualizer.create_productivity_chart(weekly_data, moving_average_window=moving_average_window)
+        # リポジトリリストを設定から取得
+        repositories = config['github'].get('repositories', [])
+        
+        # HTMLレポート生成（メタデータと統計サマリー付き）
+        html_content = visualizer.generate_html_report(weekly_data, repositories, moving_average_window)
         
         # 出力ディレクトリとファイルパスの準備
         output_config = config.get('application', {}).get('output', {})
@@ -295,7 +298,8 @@ def visualize(ctx):
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(html_content)
         
-        click.echo(f"✅ グラフが正常に生成されました: {output_path}")
+        click.echo(f"✅ HTMLレポートが正常に生成されました: {output_path}")
+        click.echo(f"📊 メタデータと統計サマリーが含まれています")
         click.echo(f"🌐 ブラウザで開いてご確認ください。")
         
     except MetricsServiceError as e:

@@ -4,6 +4,7 @@
 from typing import List, Dict, Any
 import pandas as pd
 import plotly.graph_objects as go
+import datetime
 
 from ..business_layer.timezone_handler import TimezoneHandler
 
@@ -211,3 +212,218 @@ class ProductivityVisualizer:
             showarrow=False,
             font=dict(size=16, color='gray')
         )
+    
+    def calculate_statistics(self, weekly_data: pd.DataFrame, target_repositories: List[str]) -> Dict[str, Any]:
+        """
+        週次データから統計サマリーを計算する
+        
+        Args:
+            weekly_data: 週次データのDataFrame
+            target_repositories: 対象リポジトリのリスト
+            
+        Returns:
+            統計サマリーを含む辞書
+        """
+        if weekly_data.empty:
+            return {
+                'average_productivity': 0.0,
+                'max_productivity': 0.0,
+                'min_productivity': 0.0,
+                'max_productivity_week': 'N/A',
+                'min_productivity_week': 'N/A',
+                'total_prs': 0,
+                'total_contributors': 0,
+                'target_repositories': target_repositories
+            }
+        
+        productivity_series = weekly_data['productivity']
+        
+        # 最大・最小生産性の週を特定
+        max_idx = productivity_series.idxmax()
+        min_idx = productivity_series.idxmin()
+        
+        max_week = weekly_data.loc[max_idx, 'week_start']
+        min_week = weekly_data.loc[min_idx, 'week_start']
+        
+        # 日付をローカルタイムゾーンに変換してフォーマット
+        max_week_str = self.timezone_handler.utc_to_local(max_week).strftime('%Y-%m-%d')
+        min_week_str = self.timezone_handler.utc_to_local(min_week).strftime('%Y-%m-%d')
+        
+        return {
+            'average_productivity': float(productivity_series.mean()),
+            'max_productivity': float(productivity_series.max()),
+            'min_productivity': float(productivity_series.min()),
+            'max_productivity_week': max_week_str,
+            'min_productivity_week': min_week_str,
+            'total_prs': int(weekly_data['pr_count'].sum()),
+            # NOTE: 現在の実装では週ごとのユニーク作者数の最大値を使用しています。
+            # 正確な総貢献者数（期間全体のユニーク作者数）を計算するには、
+            # 生のPRデータからユニーク作者を数える必要があります（要データ層修正）
+            'total_contributors': int(weekly_data['unique_authors'].max()),
+            'target_repositories': target_repositories
+        }
+    
+    def generate_html_report(self, weekly_data: pd.DataFrame, target_repositories: List[str], moving_average_window: int = 4) -> str:
+        """
+        メタデータと統計サマリーを含む完全なHTMLレポートを生成する
+        
+        Args:
+            weekly_data: 週次データのDataFrame
+            target_repositories: 対象リポジトリのリスト
+            moving_average_window: 移動平均のウィンドウサイズ（デフォルト: 4）
+            
+        Returns:
+            完全なHTMLレポートの文字列
+        """
+        # 統計データを計算
+        stats = self.calculate_statistics(weekly_data, target_repositories)
+        
+        # グラフのHTMLを生成
+        chart_html = self.create_productivity_chart(weekly_data, moving_average_window)
+        
+        # メタデータセクションを生成
+        metadata_html = self._generate_metadata_html(weekly_data, target_repositories)
+        
+        # 統計サマリーセクションを生成
+        statistics_html = self._generate_statistics_html(stats)
+        
+        # 完全なHTMLを組み立て
+        return self._combine_html_sections(metadata_html, statistics_html, chart_html)
+    
+    def _generate_metadata_html(self, weekly_data: pd.DataFrame, target_repositories: List[str]) -> str:
+        """
+        メタデータセクションのHTMLを生成
+        
+        Args:
+            weekly_data: 週次データのDataFrame
+            target_repositories: 対象リポジトリのリスト
+            
+        Returns:
+            メタデータセクションのHTML文字列
+        """
+        # 現在時刻を設定されたタイムゾーンで取得
+        now = datetime.datetime.now(self.timezone_handler._display_tz)
+        # タイムゾーン名を動的に取得（例：JST, PST, etc.）
+        tz_name = now.strftime('%Z') or self.timezone_handler.display_timezone.split('/')[-1]
+        generation_time = f"{now.strftime('%Y-%m-%d %H:%M')} {tz_name}"
+        
+        # 対象期間を計算
+        if not weekly_data.empty:
+            start_date = self.timezone_handler.utc_to_local(weekly_data['week_start'].min()).strftime('%Y-%m-%d')
+            end_date = self.timezone_handler.utc_to_local(weekly_data['week_end'].max()).strftime('%Y-%m-%d')
+            period = f"{start_date} 〜 {end_date}"
+        else:
+            period = "N/A"
+        
+        # リポジトリリストを文字列に変換
+        repositories_str = ', '.join(target_repositories) if target_repositories else "N/A"
+        
+        return f'''
+        <div class="metadata">
+            <p>生成日時: {generation_time}</p>
+            <p>対象期間: {period}</p>
+            <p>対象リポジトリ: {repositories_str}</p>
+        </div>
+        '''
+    
+    def _generate_statistics_html(self, stats: Dict[str, Any]) -> str:
+        """
+        統計サマリーセクションのHTMLを生成
+        
+        Args:
+            stats: 統計データの辞書
+            
+        Returns:
+            統計サマリーセクションのHTML文字列
+        """
+        return f'''
+        <div class="statistics">
+            <h2>統計サマリー</h2>
+            <ul>
+                <li>平均生産性: {stats['average_productivity']:.2f}</li>
+                <li>最高生産性: {stats['max_productivity']:.2f}（{stats['max_productivity_week']} の週）</li>
+                <li>最低生産性: {stats['min_productivity']:.2f}（{stats['min_productivity_week']} の週）</li>
+                <li>総 PR 数: {stats['total_prs']}</li>
+                <li>総貢献者数: {stats['total_contributors']}</li>
+            </ul>
+        </div>
+        '''
+    
+    def _combine_html_sections(self, metadata_html: str, statistics_html: str, chart_html: str) -> str:
+        """
+        HTMLセクションを組み合わせて完全なHTMLドキュメントを作成
+        
+        Args:
+            metadata_html: メタデータセクションのHTML
+            statistics_html: 統計セクションのHTML
+            chart_html: グラフのHTML
+            
+        Returns:
+            完全なHTMLドキュメント
+        """
+        # グラフのHTMLから<html>タグを除去してbodyの内容のみを取得
+        chart_body = self._extract_chart_body(chart_html)
+        
+        return self._get_html_template().format(
+            metadata_html=metadata_html,
+            statistics_html=statistics_html,
+            chart_body=chart_body
+        )
+    
+    def _get_html_template(self) -> str:
+        """
+        HTMLレポートのテンプレートを取得
+        
+        Returns:
+            HTMLテンプレート文字列
+        """
+        return '''<!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>生産性レポート</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                .metadata {{ background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin-bottom: 20px; }}
+                .statistics {{ background-color: #e8f4f8; padding: 15px; border-radius: 5px; margin-bottom: 20px; }}
+                .statistics ul {{ list-style-type: none; padding: 0; }}
+                .statistics li {{ margin: 5px 0; }}
+                h2 {{ color: #333; margin-top: 0; }}
+                .metadata p {{ margin: 8px 0; }}
+            </style>
+        </head>
+        <body>
+            {metadata_html}
+            {statistics_html}
+            {chart_body}
+        </body>
+        </html>'''
+    
+    def _extract_chart_body(self, chart_html: str) -> str:
+        """
+        グラフのHTMLからbodyの内容を抽出
+        
+        Args:
+            chart_html: PlotlyのHTML文字列
+            
+        Returns:
+            bodyの内容のみのHTML
+        """
+        try:
+            # PlotlyのHTMLからbodyの内容を抽出
+            if '<body>' in chart_html and '</body>' in chart_html:
+                start_idx = chart_html.find('<body>') + len('<body>')
+                end_idx = chart_html.find('</body>')
+                return chart_html[start_idx:end_idx].strip()
+            
+            # bodyタグがない場合は<div>から抽出
+            if '<div' in chart_html and 'plotly' in chart_html.lower():
+                start_idx = chart_html.find('<div')
+                if start_idx != -1:
+                    # script要素も含めて返す
+                    return chart_html[start_idx:]
+                    
+            return chart_html
+        except (ValueError, AttributeError):
+            # エラーが発生した場合はそのまま返す
+            return chart_html
