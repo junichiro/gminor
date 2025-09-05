@@ -63,11 +63,17 @@ class SyncManager:
         """
         start_time = time.time()
         
+        self.logger.info(f"Starting initial sync for {len(repositories)} repositories, {days_back} days back")
+        self.logger.debug(f"Target repositories: {repositories}")
+        
         if not repositories:
+            self.logger.warning("No repositories specified for sync")
             return self._create_sync_result(0, 0, start_time, [])
         
         try:
             since_date = self._calculate_since_date(days_back)
+            self.logger.info(f"Sync period: {since_date} to {datetime.now(timezone.utc)}")
+            
             total_prs_fetched, processed_repositories, failed_repositories = self._process_repositories(
                 repositories, since_date, progress
             )
@@ -75,9 +81,15 @@ class SyncManager:
             if progress:
                 self._display_completion_message(processed_repositories, failed_repositories)
             
-            return self._create_sync_result(
+            result = self._create_sync_result(
                 processed_repositories, total_prs_fetched, start_time, failed_repositories
             )
+            
+            duration = result['sync_duration_seconds']
+            self.logger.info(f"Initial sync completed in {duration:.2f} seconds: {result['status']}")
+            self.logger.info(f"Summary: {processed_repositories} successful, {len(failed_repositories)} failed, {total_prs_fetched} PRs fetched")
+            
+            return result
         
         except DatabaseError as e:
             self.logger.error(f"Database error during sync: {e}")
