@@ -118,3 +118,42 @@ class MetricsService:
             error_msg = f"Failed to generate metrics summary: {e}"
             logger.error(error_msg)
             raise MetricsServiceError(error_msg) from e
+    
+    def get_repository_stats(self) -> Dict[str, Dict[str, Any]]:
+        """
+        リポジトリごとの統計情報を取得
+        
+        Returns:
+            リポジトリ名をキーとする統計情報の辞書
+            
+        Raises:
+            MetricsServiceError: データ取得エラー時
+        """
+        try:
+            with self.db_manager.get_session() as session:
+                # リポジトリごとのPR数と貢献者数を集計（N+1問題を解消）
+                from sqlalchemy import func, distinct
+                from ..data_layer.models import PullRequest
+                
+                # 単一のクエリですべてのリポジトリの統計を取得
+                repo_stats_query = (
+                    session.query(
+                        PullRequest.repo_name,
+                        func.count(PullRequest.id).label("pr_count"),
+                        func.count(distinct(PullRequest.author)).label("unique_authors")
+                    )
+                    .group_by(PullRequest.repo_name)
+                    .all()
+                )
+
+                repo_stats = {
+                    repo_name: {"pr_count": pr_count, "unique_authors": unique_authors}
+                    for repo_name, pr_count, unique_authors in repo_stats_query
+                }
+                
+                return repo_stats
+                
+        except Exception as e:
+            error_msg = f"Failed to get repository stats: {e}"
+            logger.error(error_msg)
+            raise MetricsServiceError(error_msg) from e

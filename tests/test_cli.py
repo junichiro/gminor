@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch, MagicMock
 from click.testing import CliRunner
 from pathlib import Path
 
-from src.presentation_layer.cli import cli, init, visualize
+from src.presentation_layer.cli import cli, init, visualize, fetch, stats, cleanup, config
 
 
 class TestCLI:
@@ -306,3 +306,175 @@ class TestCLIErrorHandling:
         result = runner.invoke(cli, ['init', '--invalid-option'])
         assert result.exit_code != 0
         assert 'no such option' in result.output.lower()
+
+
+class TestAdditionalCLICommands:
+    """追加CLIコマンドのテスト"""
+    
+    @pytest.fixture
+    def runner(self):
+        """Click CLIランナーのフィクスチャ"""
+        return CliRunner()
+    
+    @pytest.fixture
+    def mock_components(self):
+        """モックコンポーネントのフィクスチャ"""
+        return (
+            Mock(),  # timezone_handler
+            Mock(),  # github_client
+            Mock(),  # db_manager
+            Mock()   # aggregator
+        )
+    
+    @pytest.fixture
+    def mock_services(self):
+        """モックサービスのフィクスチャ"""
+        return {
+            'sync_manager': Mock(),
+            'metrics_service': Mock(),
+            'visualizer': Mock()
+        }
+    
+    @pytest.fixture
+    def mock_config(self):
+        """モック設定のフィクスチャ"""
+        return {
+            'github': {
+                'api_token': 'test_token',
+                'repositories': ['owner/repo1', 'owner/repo2']
+            },
+            'database': {
+                'name': 'test_db'
+            },
+            'application': {
+                'timezone': 'Asia/Tokyo',
+                'output': {
+                    'directory': 'output',
+                    'filename': 'chart.html'
+                }
+            }
+        }
+    
+    # fetchコマンドのテスト
+    def test_fetchコマンドが期間指定で実行される(self, runner, mock_components, mock_services, mock_config):
+        """正常系: fetchコマンドが期間指定で正常に実行されることを確認"""
+        with patch('src.presentation_layer.cli.load_config_and_validate', return_value=mock_config):
+            with patch('src.presentation_layer.cli.create_components', return_value=mock_components):
+                with patch('src.presentation_layer.cli.create_services_from_components', return_value=mock_services):
+                    # モックの設定
+                    mock_services['sync_manager'].fetch_period_data.return_value = {
+                        'status': 'success',
+                        'fetched_prs': 50,
+                        'duration_seconds': 5.2
+                    }
+                    
+                    result = runner.invoke(cli, ['fetch', '--from', '2024-01-01', '--to', '2024-01-31'])
+                    
+                    assert result.exit_code == 0
+                    assert '特定期間のデータ取得を開始' in result.output
+                    assert '期間: 2024-01-01 〜 2024-01-31' in result.output
+                    assert 'データ取得が完了しました' in result.output
+                    
+                    # 正しい引数で呼び出されたことを確認
+                    mock_services['sync_manager'].fetch_period_data.assert_called_once_with(
+                        mock_config['github']['repositories'],
+                        '2024-01-01',
+                        '2024-01-31'
+                    )
+    
+    def test_fetchコマンドが日付形式をバリデートする(self, runner):
+        """異常系: fetchコマンドが不正な日付形式をバリデートすることを確認"""
+        result = runner.invoke(cli, ['fetch', '--from', 'invalid-date', '--to', '2024-01-31'])
+        
+        assert result.exit_code != 0
+        assert '日付形式が正しくありません' in result.output
+    
+    # statsコマンドのテスト
+    def test_statsコマンドが統計情報を表示する(self, runner, mock_components, mock_services, mock_config):
+        """正常系: statsコマンドが統計情報を正しく表示することを確認"""
+        with patch('src.presentation_layer.cli.load_config_and_validate', return_value=mock_config):
+            with patch('src.presentation_layer.cli.create_components', return_value=mock_components):
+                with patch('src.presentation_layer.cli.create_services_from_components', return_value=mock_services):
+                    # モックの設定
+                    mock_services['metrics_service'].get_metrics_summary.return_value = {
+                        'total_weeks': 10,
+                        'total_prs': 150,
+                        'average_productivity': 3.5,
+                        'max_productivity': 5.0,
+                        'min_productivity': 1.5
+                    }
+                    
+                    mock_services['metrics_service'].get_repository_stats.return_value = {
+                        'owner/repo1': {'pr_count': 80, 'unique_authors': 5},
+                        'owner/repo2': {'pr_count': 70, 'unique_authors': 8}
+                    }
+                    
+                    result = runner.invoke(cli, ['stats'])
+                    
+                    assert result.exit_code == 0
+                    assert '📊 統計情報' in result.output
+                    assert '総集計期間: 10週' in result.output
+                    assert '総PR数: 150' in result.output
+                    assert '平均生産性: 3.50' in result.output
+                    assert '最高生産性: 5.00' in result.output
+                    assert '最低生産性: 1.50' in result.output
+                    assert 'リポジトリ別統計' in result.output
+                    assert 'owner/repo1' in result.output
+                    assert 'owner/repo2' in result.output
+    
+    # cleanupコマンドのテスト
+    def test_cleanupコマンドが古いデータを削除する(self, runner, mock_components, mock_services, mock_config):
+        """正常系: cleanupコマンドが指定日付以前のデータを削除することを確認"""
+        with patch('src.presentation_layer.cli.load_config_and_validate', return_value=mock_config):
+            with patch('src.presentation_layer.cli.create_components', return_value=mock_components):
+                with patch('src.presentation_layer.cli.create_services_from_components', return_value=mock_services):
+                    # モックの設定
+                    mock_components[2].cleanup_old_data.return_value = {
+                        'deleted_prs': 100,
+                        'deleted_metrics': 20
+                    }
+                    
+                    result = runner.invoke(cli, ['cleanup', '--before', '2023-01-01', '--yes'])
+                    
+                    assert result.exit_code == 0
+                    assert 'データベースのクリーンアップを開始' in result.output
+                    assert '2023-01-01 以前のデータを削除' in result.output
+                    assert '削除されたPR: 100件' in result.output
+                    assert '削除されたメトリクス: 20件' in result.output
+                    assert 'クリーンアップが完了しました' in result.output
+                    
+                    # 正しい引数で呼び出されたことを確認
+                    mock_components[2].cleanup_old_data.assert_called_once_with('2023-01-01')
+    
+    def test_cleanupコマンドが確認プロンプトを表示する(self, runner):
+        """正常系: cleanupコマンドが実行前に確認プロンプトを表示することを確認"""
+        result = runner.invoke(cli, ['cleanup', '--before', '2023-01-01'], input='n\n')
+        
+        assert result.exit_code == 0
+        assert '本当に削除しますか？' in result.output
+        assert 'キャンセルされました' in result.output
+    
+    # configコマンドのテスト
+    def test_configコマンドが現在の設定を表示する(self, runner, mock_config):
+        """正常系: configコマンドが現在の設定を表示することを確認"""
+        with patch('src.presentation_layer.cli.load_config_and_validate', return_value=mock_config):
+            result = runner.invoke(cli, ['config'])
+            
+            assert result.exit_code == 0
+            assert '📋 現在の設定' in result.output
+            assert 'リポジトリ' in result.output
+            assert '- owner/repo1' in result.output
+            assert '- owner/repo2' in result.output
+            assert 'タイムゾーン: Asia/Tokyo' in result.output
+            assert 'データベース: test_db' in result.output
+            assert '出力ディレクトリ: output' in result.output
+    
+    def test_configコマンドでvalidateオプションが動作する(self, runner, mock_config):
+        """正常系: configコマンドのvalidateオプションが設定を検証することを確認"""
+        with patch('src.presentation_layer.cli.load_config_and_validate', return_value=mock_config):
+            with patch('src.presentation_layer.cli.validate_config', return_value=True) as mock_validate:
+                result = runner.invoke(cli, ['config', '--validate'])
+                
+                assert result.exit_code == 0
+                assert '✅ 設定は正常です' in result.output
+                mock_validate.assert_called_once_with(mock_config)

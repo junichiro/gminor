@@ -1,9 +1,10 @@
 """
-CLI コマンド実装（init・visualize）
+CLI コマンド実装（init・visualize・update・fetch・stats・cleanup・config）
 """
 import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+from datetime import datetime
 
 import click
 import pandas as pd
@@ -313,6 +314,209 @@ def visualize(ctx):
     finally:
         # リソースのクリーンアップ
         db_manager.close()
+
+
+def validate_date_format(date_str: str) -> bool:
+    """日付形式の妥当性を検証する
+    
+    Args:
+        date_str: 検証する日付文字列（YYYY-MM-DD形式）
+        
+    Returns:
+        bool: 妥当な場合True
+    """
+    try:
+        datetime.strptime(date_str, '%Y-%m-%d')
+        return True
+    except ValueError:
+        return False
+
+
+@cli.command()
+@click.option('--from', 'from_date', help='開始日（YYYY-MM-DD）', required=True)
+@click.option('--to', 'to_date', help='終了日（YYYY-MM-DD）', required=True)
+@click.pass_context
+def fetch(ctx, from_date: str, to_date: str):
+    """特定期間のデータを再取得"""
+    # 日付形式の検証
+    if not validate_date_format(from_date) or not validate_date_format(to_date):
+        raise click.ClickException("日付形式が正しくありません。YYYY-MM-DD形式で指定してください。")
+    
+    click.echo(f"🔍 特定期間のデータ取得を開始しています...")
+    click.echo(f"📅 期間: {from_date} 〜 {to_date}")
+    
+    # コンテキストから依存関係を取得
+    config = ctx.obj['config']
+    timezone_handler, github_client, db_manager, aggregator = ctx.obj['components']
+    services = ctx.obj['services']
+    
+    repositories = config['github'].get('repositories', [])
+    if not repositories:
+        raise click.ClickException(
+            "設定ファイルにリポジトリが定義されていません。\n"
+            "config.yaml の github.repositories に対象リポジトリを追加してください。"
+        )
+    
+    try:
+        sync_manager = services['sync_manager']
+        result = sync_manager.fetch_period_data(repositories, from_date, to_date)
+        
+        if result['status'] == 'success':
+            click.echo(f"✅ データ取得が完了しました！")
+            click.echo(f"📊 取得したPR数: {result.get('fetched_prs', 0)}")
+            click.echo(f"⏱️  実行時間: {result.get('duration_seconds', 0):.1f}秒")
+        else:
+            raise click.ClickException(f"データ取得に失敗しました: {result.get('error', 'Unknown error')}")
+            
+    except Exception as e:
+        raise click.ClickException(f"データ取得中にエラーが発生しました: {str(e)}")
+    finally:
+        db_manager.close()
+
+
+@cli.command()
+@click.pass_context
+def stats(ctx):
+    """統計情報表示"""
+    click.echo("📊 統計情報を取得しています...")
+    
+    # コンテキストから依存関係を取得
+    config = ctx.obj['config']
+    timezone_handler, github_client, db_manager, aggregator = ctx.obj['components']
+    services = ctx.obj['services']
+    
+    try:
+        metrics_service = services['metrics_service']
+        
+        # 基本統計情報を取得
+        summary = metrics_service.get_metrics_summary()
+        
+        click.echo("\n📊 統計情報")
+        click.echo("=" * 50)
+        click.echo(f"📅 総集計期間: {summary['total_weeks']}週")
+        click.echo(f"📋 総PR数: {summary['total_prs']}")
+        click.echo(f"📈 平均生産性: {summary['average_productivity']:.2f}")
+        click.echo(f"🔝 最高生産性: {summary['max_productivity']:.2f}")
+        click.echo(f"🔻 最低生産性: {summary['min_productivity']:.2f}")
+        
+        # リポジトリ別統計を取得
+        repo_stats = metrics_service.get_repository_stats()
+        if repo_stats:
+            click.echo("\n📂 リポジトリ別統計")
+            click.echo("-" * 50)
+            for repo_name, stats in repo_stats.items():
+                click.echo(f"\n{repo_name}:")
+                click.echo(f"  PR数: {stats.get('pr_count', 0)}")
+                click.echo(f"  貢献者数: {stats.get('unique_authors', 0)}")
+        
+    except Exception as e:
+        raise click.ClickException(f"統計情報の取得中にエラーが発生しました: {str(e)}")
+    finally:
+        db_manager.close()
+
+
+@cli.command()
+@click.option('--before', help='指定日以前のデータを削除（YYYY-MM-DD）', required=True)
+@click.option('--yes', is_flag=True, help='確認をスキップ')
+@click.pass_context
+def cleanup(ctx, before: str, yes: bool):
+    """データベースのクリーンアップ"""
+    # 日付形式の検証
+    if not validate_date_format(before):
+        raise click.ClickException("日付形式が正しくありません。YYYY-MM-DD形式で指定してください。")
+    
+    click.echo(f"🗑️  データベースのクリーンアップを開始します")
+    click.echo(f"⚠️  {before} 以前のデータを削除します")
+    
+    # 確認プロンプト
+    if not yes:
+        if not click.confirm("本当に削除しますか？"):
+            click.echo("❌ キャンセルされました")
+            return
+    
+    # コンテキストから依存関係を取得
+    config = ctx.obj['config']
+    timezone_handler, github_client, db_manager, aggregator = ctx.obj['components']
+    
+    try:
+        result = db_manager.cleanup_old_data(before)
+        
+        click.echo(f"✅ クリーンアップが完了しました")
+        click.echo(f"🗑️  削除されたPR: {result.get('deleted_prs', 0)}件")
+        click.echo(f"📊 削除されたメトリクス: {result.get('deleted_metrics', 0)}件")
+            
+    except Exception as e:
+        raise click.ClickException(f"クリーンアップ中にエラーが発生しました: {str(e)}")
+    finally:
+        db_manager.close()
+
+
+@cli.command()
+@click.option('--validate', is_flag=True, help='設定の妥当性を検証')
+@click.pass_context
+def config(ctx, validate: bool):
+    """設定確認"""
+    try:
+        # 設定を取得
+        config_data = ctx.obj['config']
+        
+        click.echo("📋 現在の設定")
+        click.echo("=" * 50)
+        
+        # リポジトリ一覧
+        repositories = config_data['github'].get('repositories', [])
+        click.echo("\n🗂️  リポジトリ:")
+        for repo in repositories:
+            click.echo(f"  - {repo}")
+        
+        # アプリケーション設定
+        app_config = config_data.get('application', {})
+        click.echo(f"\n🕐 タイムゾーン: {app_config.get('timezone', 'UTC')}")
+        
+        # データベース設定
+        db_config = config_data.get('database', {})
+        click.echo(f"\n💾 データベース: {db_config.get('name', 'N/A')}")
+        
+        # 出力設定
+        output_config = app_config.get('output', {})
+        click.echo(f"\n📁 出力ディレクトリ: {output_config.get('directory', 'output')}")
+        click.echo(f"📄 出力ファイル名: {output_config.get('filename', 'productivity_chart.html')}")
+        
+        # 妥当性検証
+        if validate:
+            click.echo("\n🔍 設定の検証中...")
+            if validate_config(config_data):
+                click.echo("✅ 設定は正常です")
+            else:
+                click.echo("❌ 設定に問題があります")
+                
+    except Exception as e:
+        raise click.ClickException(f"設定の読み込み中にエラーが発生しました: {str(e)}")
+
+
+def validate_config(config_data: Dict[str, Any]) -> bool:
+    """設定の妥当性を検証する
+    
+    Args:
+        config_data: 検証する設定データ
+        
+    Returns:
+        bool: 妥当な場合True
+    """
+    # 必須項目の確認
+    if 'github' not in config_data:
+        return False
+    
+    github_config = config_data['github']
+    if 'repositories' not in github_config or not github_config['repositories']:
+        return False
+    
+    # リポジトリ形式の確認（owner/name形式）
+    for repo in github_config['repositories']:
+        if '/' not in repo:
+            return False
+    
+    return True
 
 
 if __name__ == '__main__':
